@@ -87,7 +87,9 @@ function Camera:updatePosition(dt)
 		height = self.viewport.height / self.zoom,
 	}
 	-- TODO: câmera única quando os jogadores estão próximos
-	if #cameras == 1 and #players > 1 then
+	if BadAppleManager and BadAppleManager.isActive then
+		-- Mantém a câmera no targetPos definido pelo BadAppleManager (centro da sala)
+	elseif #cameras == 1 and #players > 1 then
 		local pos = { x = 0, y = 0 }
 		for _, p in pairs(players) do
 			pos.x = pos.x + p.pos.x

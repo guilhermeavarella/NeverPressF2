@@ -270,6 +270,10 @@ function renderEntities(camera)
 
 	love.graphics.setBlendMode("alpha")
 
+	if BadAppleManager and BadAppleManager.isActive then
+		BadAppleManager.draw(camera)
+	end
+
 	-- desenha as entidades e VFXs na ordem correta
 	for _, obj in ipairs(drawList) do
 		if obj.isAnimVFX then

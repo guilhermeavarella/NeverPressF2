@@ -20,6 +20,7 @@ require("modules.tooling.roomcontrol")
 require("modules.tooling.spawnBlessing")
 require("modules.tooling.spawnDrop")
 require("modules.tooling.turtledebug")
+require("modules.tooling.badapple")
 require("modules.tooling.fpsvisor")
 require("modules.systems.dialogue")
 require("modules.systems.shaders")
@@ -58,6 +59,13 @@ function love.keypressed(key, scancode, isrepeat)
 	globalUIManager:handleInput(key)
 	for _, p in pairs(players) do
 		p.uiManager:handleInput(key)
+	end
+
+	if key == "f2" then
+		if gameCtx == MENU_CTX then
+			startGame()
+		end
+		BadAppleManager.toggle()
 	end
 
 	if gameCtx ~= GAMEPLAY_CTX then
@@ -148,13 +156,14 @@ function love.load()
 		MUSIC_LAYER3,
 	})
 
-	globalAudioManager:play(MUSIC_MENU)
-
 	-- carregando a biblioteca de UI
 	globalUIManager = initGlobalUIManager()
 
 	-- carregando o gerenciador de partículas
 	globalVFXManager = initGlobalVFXManager()
+
+	-- inicializando o easter egg do Bad Apple
+	BadAppleManager.init()
 
 	-- definindo a seed de aleatoriedade
 	math.randomseed(os.time())
@@ -206,6 +215,10 @@ function love.update(dt)
 	----------- Cameras -----------
 	for _, c in pairs(cameras) do
 		c:updatePosition(dt)
+	end
+	---------- Bad Apple ----------
+	if BadAppleManager and BadAppleManager.isActive then
+		BadAppleManager.update(dt)
 	end
 
 	-------------- UI -------------
