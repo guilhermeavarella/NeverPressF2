@@ -6,6 +6,77 @@ require("modules.systems.dialogue")
 require("modules.utils.anchors")
 
 ----------------------------------------
+-- Variáveis
+----------------------------------------
+
+local drawList = {}
+local drawListPool = {}
+local shadows = {}
+local shadowsPool = {}
+local bgList = {}
+local bgListPool = {}
+
+----------------------------------------
+-- Funções locais
+----------------------------------------
+
+---@param entity Entity
+---@param yPos number
+---@param isAnimVFX? boolean
+---@param isParticleVFX? boolean
+-- tira uma tabela do pool para colocar na lista de draw
+-- se não tiver mais nenhuma tabela livre no pool, cria uma nova (caso em que aloca memória)
+local function addEntityToDrawList(entity, yPos, isAnimVFX, isParticleVFX)
+	local item = drawListPool[#drawListPool]
+	if item then
+		drawListPool[#drawListPool] = nil
+	else
+		item = {}
+	end
+
+	item.it = entity
+	item.y = yPos
+	item.isAnimVFX = isAnimVFX
+	item.isParticleVFX = isParticleVFX
+	drawList[#drawList + 1] = item
+end
+
+---@param sx number
+---@param sy number
+---@param rx number
+---@param ry number
+-- tira uma tabela de sombra do pool para colocar na lista de draw das sombras
+local function addShadow(sx, sy, rx, ry)
+	local s = shadowsPool[#shadowsPool]
+	if s then
+		shadowsPool[#shadowsPool] = nil
+	else
+		s = {}
+	end
+	s.sx, s.sy = sx, sy
+	s.rx, s.ry = rx, ry
+	shadows[#shadows + 1] = s
+end
+
+--- @param entity Entity
+--- @param yPos number
+-- tira uma tabela do pool para colocar na lista de draw do background
+-- se não tiver mais nenhuma tabela livre no pool, cria uma nova (caso em que aloca memória)
+local function addEntityToBgList(entity, yPos)
+	local item = bgListPool[#bgListPool]
+	if item then
+		bgListPool[#bgListPool] = nil
+	else
+		item = {}
+	end
+
+	item.it = entity
+	item.y = yPos
+
+	bgList[#bgList + 1] = item
+end
+
+----------------------------------------
 -- Funções Globais
 ----------------------------------------
 
@@ -18,9 +89,11 @@ function renderRooms(camera)
 			if not r then
 				goto nextroom
 			end
-
-			local roomViewPos = addVec(camera:viewPos(r.limits.p1), vec(Room.spacingH / 2, Room.spacingV / 2))
-			love.graphics.draw(r.sprites.floor, roomViewPos.x, roomViewPos.y, 0, 3, 3)
+			local roomViewPos = addVec(vec(camera:viewPos(r.limits.p1)), vec(Room.spacingH / 2, Room.spacingV / 2))
+			-- love.graphics.draw(r.sprites.floor, roomViewPos.x, roomViewPos.y, 0, 3, 3)
+			love.graphics.setColor(25 / 255, 21 / 255, 83 / 255, 1)
+			love.graphics.rectangle("fill", roomViewPos.x - 1000, roomViewPos.y - 1000, 2000, 2000)
+			love.graphics.setColor(1, 1, 1, 1)
 
 			::nextroom::
 		end
@@ -32,156 +105,111 @@ end
 ----------------------------------------
 
 ---@param camera Camera
+-- renderiza os links de todas as salas na perspectiva da `camera`
+function renderLinks(camera)
+	for _, r in activeRooms:iter() do
+		r.linkManager:draw(camera)
+	end
+end
+
+---@param camera Camera
 -- renderiza as demais entidades (além das salas) na perspecitiva da `camera`
 function renderEntities(camera)
-	local drawList = {}
+	-- resetando o pool e as listas de draw
+	for i = #drawList, 1, -1 do
+		drawListPool[#drawListPool + 1] = drawList[i]
+		drawList[i] = nil
+	end
+	for i = #bgList, 1, -1 do
+		bgListPool[#bgListPool + 1] = bgList[i]
+		bgList[i] = nil
+	end
+	for i = #shadows, 1, -1 do
+		shadowsPool[#shadowsPool + 1] = shadows[i]
+		shadows[i] = nil
+	end
 
 	for _, r in activeRooms:iter() do
-		-- Adiciona destrutíveis
+		-- adiciona destrutíveis
 		for _, d in pairs(r.destructibles) do
-			table.insert(drawList, {
-				it = d,
-				y = d.pos.y + getAnchor(d, FLOOR),
-				draw = function()
-					d:draw(camera)
-				end,
-			})
+			addEntityToDrawList(d, d.pos.y + getAnchor(d, FLOOR))
 		end
-		-- Adiciona objetos interativos
+		-- adiciona objetos interativos
 		for _, i in pairs(r.interactives) do
-			table.insert(drawList, {
-				it = i,
-				y = i.pos.y + getAnchor(i, FLOOR),
-				draw = function()
-					i:draw(camera)
-				end,
-			})
+			addEntityToDrawList(i, i.pos.y + getAnchor(i, FLOOR))
 		end
-		-- Adiciona portas
-		for _, d in pairs(r.doors) do
-			table.insert(drawList, {
-				it = d,
-				y = d.pos.y + getAnchor(d, FLOOR),
-				draw = function()
-					d:draw(camera)
-				end,
-			})
+		-- adiciona portas
+		for _, d in pairs(r:getDoors()) do
+			addEntityToDrawList(d, d.pos.y + getAnchor(d, FLOOR))
 		end
-		-- Adiciona drops
+		-- adiciona paredes
+		for _, w in pairs(r:getWalls()) do
+			addEntityToDrawList(w, w.pos.y + getAnchor(w, FLOOR))
+		end
+		-- adiciona drops
 		for _, i in pairs(r.drops) do
-			local dropScale = (i.object and i.object.type == RESOURCE) and 1.875 or 3
-
-			i.scale = dropScale
-			table.insert(drawList, {
-				it = i,
-				y = i.floorY + getAnchor(i, FLOOR, dropScale),
-				draw = function()
-					i:draw(camera)
-				end,
-			})
+			-- esse terceiro argumento é dropScale
+			addEntityToDrawList(
+				i,
+				i.pos.y + getAnchor(i, FLOOR, (i.object and i.object.type == RESOURCE) and 1.875 or 3)
+			)
 		end
-		-- Adiciona inimigos
+		-- adiciona inimigos
 		for _, e in pairs(r.enemies) do
-			table.insert(drawList, {
-				it = e,
-				y = e.pos.y + getAnchor(e, FLOOR),
-				draw = function()
-					e:draw(camera)
-				end,
-			})
-			-- Adiciona ataques de inimigos
+			addEntityToDrawList(e, e.pos.y + getAnchor(e, FLOOR))
+			-- adiciona ataques de inimigos
 			for _, a in pairs(e.atk) do
 				for _, ev in pairs(a.events) do
-					table.insert(drawList, {
-						it = ev,
-						y = ev.pos.y + getAnchor(ev, FLOOR) + getAnchor(e, FLOOR),
-						draw = function()
-							ev:draw(camera)
-						end,
-					})
+					addEntityToDrawList(ev, ev.pos.y + getAnchor(ev, FLOOR))
 				end
 			end
 		end
-
-		-- Adiciona NPCs
+		-- adiciona NPCs
 		for _, npc in pairs(r.npcs) do
-			table.insert(drawList, {
-				it = npc,
-				y = npc.pos.y + getAnchor(npc, FLOOR),
-				draw = function()
-					npc:draw(camera)
-				end,
-			})
+			addEntityToDrawList(npc, npc.pos.y + getAnchor(npc, FLOOR))
 		end
+		-- adiciona obstáculos
+		for _, o in pairs(r.obstacles) do
+			local y = o.pos.y + getAnchor(o, FLOOR)
 
-		-- Adiciona obstáculos
-		for _, obs in pairs(r.obstacles) do
-			table.insert(drawList, {
-				it = obs,
-				y = obs.pos.y + getAnchor(obs, FLOOR),
-				draw = function()
-					obs:draw(camera)
-				end,
-			})
+			if o.isBg then
+				addEntityToBgList(o, y)
+			else
+				addEntityToDrawList(o, y)
+			end
 		end
 	end
 
-	-- Adiciona jogadores e suas possíveis armas e construções
+	-- adiciona jogadores e suas possíveis armas e construções
 	for _, p in pairs(players) do
-		table.insert(drawList, {
-			it = p,
-			y = p.pos.y + getAnchor(p, FLOOR),
-			draw = function()
-				p:draw(camera)
-			end,
-		})
+		addEntityToDrawList(p, p.pos.y + getAnchor(p, FLOOR))
 
 		if p.weapon then
-			local w = p.weapon
-			local offsetY = (w.rotation / math.pi < -1 or w.rotation / math.pi > 0) and 2 or -2
-			table.insert(drawList, {
-				it = w,
-				y = p.pos.y + getAnchor(p, FLOOR) + offsetY, -- mesma altura do jogador, mas deslocado para frente ou para trás
-				draw = function()
-					w:draw(camera)
-				end,
-			})
+			addEntityToDrawList(
+				p.weapon,
+				p.pos.y + getAnchor(p, FLOOR) + invertFirstAndSecondQuadrants(p.weapon.rotation) * 4
+			)
 		end
 
 		for _, w in pairs(p.weapons) do
 			for _, e in pairs(w.atk.events) do
-				table.insert(drawList, {
-					it = e,
-					y = e.pos.y + getAnchor(e, FLOOR) + getAnchor(p, FLOOR),
-					draw = function()
-						e:draw(camera)
-					end,
-				})
+				addEntityToDrawList(e, e.pos.y + getAnchor(p, FLOOR))
 			end
 		end
 
 		if p.building then
 			local b = p.building
-			table.insert(drawList, {
-				it = b,
-				y = b.pos.y + getAnchor(b, FLOOR),
-				draw = function()
-					b:draw(camera)
-				end,
-			})
+			addEntityToDrawList(p.building, p.building.pos.y + getAnchor(p.building, FLOOR))
 		end
 	end
 
-	-- Construir sombras separadamente para não mutar drawList durante iteração
-	local shadows = {}
+	-- construindo sombras separadamente para não mutar drawList durante iteração
 	for _, obj in ipairs(drawList) do
 		if obj.it and obj.it.hasShadow then
 			local sx = (obj.it.pos and obj.it.pos.x) or 0
 			local sy = obj.y - 1
-
 			local frameWidth
 			local scale = obj.it.scale or 3
-
 			if obj.it.shadowWidth then
 				frameWidth = obj.it.shadowWidth * scale
 			else
@@ -192,46 +220,134 @@ function renderEntities(camera)
 			local rx = frameWidth / 2
 			local ry = rx * 0.4
 
-			table.insert(shadows, {
-				y = sy,
-				draw = function()
-					love.graphics.setColor(0, 0, 0.1, 1.0)
-					love.graphics.setShader(ditherShadowShader)
-					local viewPos = camera:viewPos(vec(sx, sy))
-					ditherShadowShader:send("shadow_center", { viewPos.x, viewPos.y })
-					ditherShadowShader:send("shadow_radii", { rx, ry })
-					ditherShadowShader:send("time", love.timer.getTime())
-					ditherShadowShader:send("zoom", camera.zoom)
-					ditherShadowShader:send("viewport_size", { camera.viewport.width, camera.viewport.height })
-
-					love.graphics.circle("fill", viewPos.x, viewPos.y, rx)
-
-					love.graphics.setColor(1, 1, 1, 1)
-					love.graphics.setShader()
-				end,
-			})
+			addShadow(sx, sy, rx, ry)
 		end
 	end
 
-	-- Ordena por posição Y
+	-- adicionando os VFX
+	for _, particles in pairs(globalVFXManager.particlesInst) do
+		for _, instance in pairs(particles) do
+			local _, y = instance.particle:getPosition()
+			addEntityToDrawList(instance, y, false, true)
+		end
+	end
+	for _, anim in pairs(globalVFXManager.animInstances) do
+		addEntityToDrawList(anim, anim.pos.y, true, false)
+	end
+
+	-- ordena os obstáculos de background por posição Y
+	table.sort(bgList, function(a, b)
+		return a.y < b.y
+	end)
+
+	-- ordena por posição Y
 	table.sort(drawList, function(a, b)
 		return a.y < b.y
 	end)
 
-	for _, s in ipairs(shadows) do
-		s.draw()
+	-- desenha os obstáculos de background
+	for _, obj in ipairs(bgList) do
+		obj.it:draw(camera)
 	end
+
+	-- renderiza links de todas as salas
+	renderLinks(camera)
+
+	-- desenha as sombras das entidades
+	love.graphics.setColor(0, 0, 0.1, 1.0)
+	love.graphics.setShader(ditherShadowShader)
+	for _, s in ipairs(shadows) do
+		local viewX, viewY = camera:viewPos(vec(s.sx, s.sy))
+		ditherShadowShader:send("shadow_center", { viewX, viewY })
+		ditherShadowShader:send("shadow_radii", { s.rx, s.ry })
+		ditherShadowShader:send("time", love.timer.getTime())
+		ditherShadowShader:send("zoom", camera.zoom)
+		ditherShadowShader:send("viewport_size", { camera.viewport.width, camera.viewport.height })
+		love.graphics.circle("fill", viewX, viewY, s.rx)
+	end
+	love.graphics.setColor(1, 1, 1, 1)
+	love.graphics.setShader()
 
 	love.graphics.setBlendMode("alpha")
 
-	-- Desenha na ordem correta
+	-- desenha as entidades e VFXs na ordem correta
 	for _, obj in ipairs(drawList) do
-		obj.draw()
+		if obj.isAnimVFX then
+			globalVFXManager:drawAnimation(obj.it, camera)
+		elseif obj.isParticleVFX then
+			globalVFXManager:drawParticleInstance(obj.it, camera)
+		else
+			obj.it:draw(camera)
+		end
 	end
+end
+
+---@param drawFunc function
+---@param color table
+---@param lightLevels number
+---@param gridSize number
+function renderWithLight(drawFunc, color, lightLevels, gridSize)
+	love.graphics.setShader(glowShader)
+	glowShader:send("glow_color", color)
+	glowShader:send("steps", lightLevels)
+	glowShader:send("grid_size", gridSize)
+	glowShader:send("time", love.timer.getTime())
+	drawFunc()
+	love.graphics.setShader()
+end
+
+---@param camera Camera
+-- renderiza iluminações, como as de tochas ou dos players
+function renderLighting(camera)
+	for _, r in activeRooms:iter() do
+		-- Iluminações de obstáculos
+		for _, obs in pairs(r.obstacles) do
+			if obs.emitsLight then
+				local viewX, viewY = camera:viewPos(obs.pos)
+				local drawFunc = function()
+					love.graphics.draw(
+						assetManager.emptyTex,
+						viewX - obs.glowRadius / 2,
+						viewY - obs.glowRadius / 2,
+						0,
+						obs.glowRadius,
+						obs.glowRadius
+					)
+				end
+				renderWithLight(drawFunc, { 0.9, 0.2, 0.4, 0.66 }, lightLevels, obs.glowRadius / 5)
+			end
+		end
+	end
+
+	-- Player
+	for _, p in pairs(players) do
+		local viewX, viewY = camera:viewPos(p.pos)
+		local glowRadius = p.glowRadius or 600
+		local lightLevels = p.lightLevels or 20
+		local drawFunc = function()
+			love.graphics.draw(
+				assetManager.emptyTex,
+				viewX - glowRadius / 2,
+				viewY - glowRadius / 2,
+				0,
+				glowRadius,
+				glowRadius
+			)
+		end
+		renderWithLight(drawFunc, { 0.7, 0.7, 0.9, 0.15 }, lightLevels, glowRadius / 5)
+	end
+end
+
+function renderVignette(camera)
+	-- renderizando a vinheta escura nas bordas da câmera
+	love.graphics.setShader(darkVignetteShader)
+	love.graphics.draw(assetManager.emptyTex, 0, 0, 0, camera.viewport.width, camera.viewport.height)
+	love.graphics.setShader()
 end
 
 function renderPlayerUIs(camera)
 	camera.playerAttached.uiManager:draw(camera)
+	camera.playerAttached.room.uiManager:draw(camera)
 end
 
 ---@param camera Camera
@@ -329,19 +445,19 @@ end
 ---@param hitbox CircleHitbox
 --- renderiza a hitbox circular na perspectiva da `camera`
 function renderCircleHitbox(camera, hitbox)
-	local viewPos = camera:viewPos(hitbox.offset)
-	love.graphics.circle("line", viewPos.x, viewPos.y, hitbox.shape.radius)
+	local viewX, viewY = camera:viewPos(hitbox.offset)
+	love.graphics.circle("line", viewX, viewY, hitbox.shape.radius)
 end
 
 ---@param camera Camera
 ---@param hitbox RectHitbox
 --- renderiza a hitbox retangular na perspectiva da `camera`
 function renderRectangleHitbox(camera, hitbox)
-	local viewPos = camera:viewPos(hitbox.offset)
+	local viewX, viewY = camera:viewPos(hitbox.offset)
 	love.graphics.rectangle(
 		"line",
-		viewPos.x - hitbox.shape.width / 2,
-		viewPos.y - hitbox.shape.height / 2,
+		viewX - hitbox.shape.width / 2,
+		viewY - hitbox.shape.height / 2,
 		hitbox.shape.width,
 		hitbox.shape.height
 	)
@@ -351,8 +467,8 @@ end
 ---@param hitbox LineHitbox
 --- renderiza a hitbox em formato de linha na perspectiva da `camera` (precisa de revisão)
 function renderLineHitbox(camera, hitbox)
-	local viewPos = camera:viewPos(hitbox.offset)
+	local viewX, viewY = camera:viewPos(hitbox.offset)
 	local endPos = addVec(hitbox.offset, polarToVec(hitbox.shape.angle, hitbox.shape.length))
-	local viewEndPos = camera:viewPos(endPos)
-	love.graphics.line(viewPos.x, viewPos.y, viewEndPos.x, viewEndPos.y)
+	local viewEndX, viewEndY = camera:viewPos(endPos)
+	love.graphics.line(viewX, viewY, viewEndX, viewEndY)
 end

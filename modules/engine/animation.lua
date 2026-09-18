@@ -15,8 +15,10 @@ require("table")
 ---@field frameDim Size
 ---@field currFrame number
 ---@field timer number
+---@field isFinished boolean
 ---@field onFinish? function
 ---@field update function
+---@field offset Vec
 
 Animation = {}
 Animation.__index = Animation
@@ -26,21 +28,27 @@ Animation.__index = Animation
 ---@param looping boolean
 ---@param loopFrame number
 ---@param frameDim Size
+---@param offset Vec?
+---@param onFinish function?
 ---@return Animation
 -- cria uma animação com as configurações passadas como argumento
-function Animation.new(frames, frameDur, looping, loopFrame, frameDim)
+function Animation.new(frames, frameDur, looping, loopFrame, frameDim, offset, onFinish)
 	local animation = setmetatable({}, Animation)
 
 	-- atributos que variam
-	animation.frames = frames -- número de frames na animação
+	animation.frames = frames    -- número de frames na animação
 	animation.frameDur = frameDur -- duração de cada frame em segundos
-	animation.looping = looping -- se a animação é ciclica ou não
+	animation.looping = looping  -- se a animação é ciclica ou não
 	animation.loopFrame = loopFrame -- a partir de qual frame a animação é ciclica
 	animation.frameDim = frameDim -- dimensões de cada frame
+	animation.isFinished = false -- se a animação terminou ou não
+	animation.onFinish = onFinish -- callback chamado quando a animação não-loop termina
 	-- atributos fixos na instanciação
-	animation.currFrame = 1 -- frame atual
-	animation.timer = 0 -- tempo decorrido desde a última mudança de frame
-	animation.onFinish = nil -- callback chamado quando a animação não-loop termina
+	animation.currFrame = 1      -- frame atual
+	animation.timer = 0          -- tempo decorrido desde a última mudança de frame
+
+	local center = vec(frameDim.width / 2, frameDim.height / 2)
+	animation.offset = offset and addVec(offset, center) or center -- offset do centro do sprite
 
 	return animation
 end
@@ -62,17 +70,20 @@ function Animation:update(dt)
 			else
 				-- trava no último frame e chama callback se existir
 				self.currFrame = #self.frames
-				if self.onFinish then
+				if not self.isFinished and self.onFinish then
 					self.onFinish(self)
 				end
+				self.isFinished = true
 			end
 		end
 	end
 end
 
--- volta a animação ao primeiro frame
+-- volta a animação ao primeiro frame e a torna executável novamente
 function Animation:reset()
 	self.currFrame = 1
+	self.timer = 0
+	self.isFinished = false
 end
 
 ----------------------------------------
@@ -87,9 +98,9 @@ end
 function newAnimation(path, settings)
 	local sheetImg = assetManager:getImage(path)
 	local frames = {}
-	local gap = 4
 	local sWidth = sheetImg:getWidth()
 	local sHeight = sheetImg:getHeight()
+	local gap = settings.gap ~= nil and settings.gap or 4
 	local qWidth = settings.quadSize.width
 	local qHeight = settings.quadSize.height
 	local i = 0
@@ -106,7 +117,14 @@ function newAnimation(path, settings)
 	end
 
 	::createanimation::
-	return Animation.new(frames, settings.frameDur, settings.looping, settings.loopFrame, settings.quadSize)
+	return Animation.new(
+		frames,
+		settings.frameDur,
+		settings.looping,
+		settings.loopFrame,
+		settings.quadSize,
+		settings.offset
+	)
 end
 
 ---@class AnimSettings
@@ -115,21 +133,29 @@ end
 ---@field frameDur number
 ---@field looping boolean
 ---@field loopFrame number
+---@field gap number
+---@field offset Vec
 
 ---@param numFrames number
 ---@param quadSize Size
 ---@param frameDur number
 ---@param looping boolean
 ---@param loopFrame number?
+---@param gap number?
+---@param offset Vec?
+---@param onFinish function?
 ---@return AnimSettings
 -- cria uma cofiguração de animação, usada para criar novas animações
-function newAnimSetting(numFrames, quadSize, frameDur, looping, loopFrame)
+function newAnimSetting(numFrames, quadSize, frameDur, looping, loopFrame, gap, offset, onFinish)
 	return {
 		numFrames = numFrames,
 		quadSize = quadSize,
 		frameDur = frameDur,
 		looping = looping,
-		loopFrame = loopFrame,
+		loopFrame = loopFrame or 1,
+		gap = gap or 4,
+		offset = offset or vec(0, 0),
+		onFinish or nil,
 	}
 end
 
@@ -142,6 +168,8 @@ end
 -- o sprite sheet da animação
 function addAnimation(entity, path, action, settings)
 	local animation = newAnimation(path, settings)
+	entity.animations = entity.animations or {}
+	entity.spriteSheets = entity.spriteSheets or {}
 	entity.animations[action] = animation
 	entity.spriteSheets[action] = assetManager:getImage(path)
 end

@@ -69,7 +69,7 @@ function Drop.new(object, pos, room, autoPick, floorY)
 	if object.image then
 		drop.image = object.image
 	else
-		local sprite_path = pngPathFormat({ "assets", "sprites", "drops", object.name })
+		local sprite_path = pngPathFormat({ "assets", "sprites", "icons", object.type.."s", object.name })
 		drop.image = love.graphics.newImage(sprite_path)
 		drop.image:setFilter("nearest", "nearest")
 	end
@@ -148,16 +148,14 @@ function Drop:draw(camera)
 	end
 
 	local visualPos = addVec(self.pos, self.visualOffset)
-	local viewPos = camera:viewPos(visualPos)
-	local offset = {
-		x = self.image:getWidth() / 2,
-		y = self.image:getHeight() / 2,
-	}
+	local viewX, viewY = camera:viewPos(visualPos)
+	local offsetX = self.image:getWidth() / 2
+	local offsetY = self.image:getHeight() / 2
 
 	if self.shine and self.object.type ~= RESOURCE then
-		drawSpriteWithOutline(self.image, viewPos.x, viewPos.y, scale, offset)
+		drawSpriteWithOutline(self.image, viewX, viewY, scale, vec(offsetX, offsetY))
 	else
-		love.graphics.draw(self.image, viewPos.x, viewPos.y, 0, scale, scale, offset.x, offset.y)
+		love.graphics.draw(self.image, viewX, viewY, 0, scale, scale, offsetX, offsetY)
 	end
 	love.graphics.setShader()
 end

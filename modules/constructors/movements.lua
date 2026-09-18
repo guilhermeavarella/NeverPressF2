@@ -16,28 +16,23 @@ require("modules.systems.movement")
 -- movimento. Ou seja, estamos criando uma implementação do
 -- padrão estratégia baseada em closures
 
-function straightMovement()
-	return function(entity, dt)
-		local desiredVel = polarToVec(entity.direction or 0, entity.speed)
-		applySteering(entity, desiredVel, 20)
-	end
-end
-
----@param period? number
----@param ampDeg? rad
+---@param amplitude? integer
+---@param frequency? integer
 ---@return MovementFunc
-function zigZagMovement(ampDeg, period)
-	period = period or 1
-	ampDeg = ampDeg or math.rad(45)
+-- um movimento em linha reta, mas com uma oscilação brusca para os lados, criando um efeito de "zig zag"
+function zigZagMovement(amplitude, frequency)
+	frequency = frequency or 1
+	amplitude = amplitude or 50
 	local time = 0
 
 	return function(entity, dt)
 		time = time + dt
-		local s = sign(math.fmod(time - period / 2, period) - period / 2)
-		local targetAngle = (entity.direction or 0) + (ampDeg * s)
-		local desiredVel = polarToVec(targetAngle, entity.speed)
-		-- aplicando um steering pesado para forçar uma mudança abrupta de
-		-- direção, quase que ignorando a inércia
+
+		local forward = polarToVec(entity.direction or 0, entity.speed)
+		local tangent = normalize(tangentVec(forward))
+		local side = scaleVec(tangent, sign(math.cos(frequency * time)) * amplitude)
+		local desiredVel = addVec(forward, side)
+
 		applySteering(entity, desiredVel, 20)
 	end
 end
@@ -45,7 +40,10 @@ end
 ---@param amplitude? integer
 ---@param frequency? integer
 ---@return MovementFunc
+-- um movimento em linha reta, mas com uma oscilação suave para os lados, criando um "sine effect"
 function sineMovement(amplitude, frequency)
+	frequency = frequency or 1
+	amplitude = amplitude or 50
 	local time = 0
 
 	return function(entity, dt)
@@ -60,24 +58,49 @@ function sineMovement(amplitude, frequency)
 	end
 end
 
----@param amplitude? integer
 ---@param frequency? integer
 ---@return MovementFunc
-function sineMovement(amplitude, frequency)
+-- um movimento em linha reta, mas com uma oscilação quadratica, criando um efeito de "square wave"
+function squaredMovement(frequency)
+	local period = (1 / frequency) or 0.1
 	local time = 0
-	
+
 	return function(entity, dt)
 		time = time + dt
 
 		local forward = polarToVec(entity.direction or 0, entity.speed)
-		local tangent = normalize(tangentVec(forward))
-		local side = scaleVec(tangent, math.sin(frequency * time) * amplitude)
-		local desiredVel = addVec(forward, side)
+		local tangent = tangentVec(forward)
+
+		local vy = math.cos(math.pi / 2 * math.floor(time / period + 1 / 2))
+		local vx = (math.cos(math.pi * math.floor(time / period + 3 / 2)) + 1) / 2
+		local desiredVel = addVec(scaleVec(forward, vx), scaleVec(tangent, vy))
+
+		applySteering(entity, desiredVel, 30)
+	end
+end
+
+---@param frequency? number
+---@return MovementFunc
+-- um movimento de "passo": a velocidade da entidade oscila entre 0 e a velocidade máxima, criando um efeito de "parar e ir"
+function stepMovement(frequency)
+	frequency = frequency or 1
+	local time = 0
+
+	return function(entity, dt)
+		time = time + dt
+
+		local step = 1 - math.cos(2 * math.pi * frequency * time)
+		local desiredVel = polarToVec(entity.direction or 0, entity.speed * step)
 
 		applySteering(entity, desiredVel, 20)
 	end
 end
 
+---@param radius number
+---@param angularSpeed number
+---@param speed number
+---@return MovementFunc
+-- um movimento orbital: a entidade orbita em torno de um ponto enquanto se move para frente
 function orbitalMovement(radius, angularSpeed, speed)
 	local angle = 0
 
@@ -85,10 +108,55 @@ function orbitalMovement(radius, angularSpeed, speed)
 		angle = angle + angularSpeed * dt
 
 		local forwardVel = polarToVec(entity.direction, speed or entity.speed)
-		local orbitVel = polarToVec(angle + math.pi/2, angularSpeed * radius)
+		local orbitVel = polarToVec(angle + entity.direction - math.pi / 2, angularSpeed * radius)
 		local desiredVel = addVec(forwardVel, orbitVel)
 
 		applySteering(entity, desiredVel, 20)
+	end
+end
+
+---@param radius number
+---@param angularSpeed number
+---@return MovementFunc
+-- um movimento em espiral, onde a entidade orbita em torno de um ponto enquanto se afasta dele
+function spiralMovement(radius, angularSpeed)
+	local angle = 0
+	local r = radius / 4
+
+	return function(entity, dt)
+		angle = angle + angularSpeed * dt
+		r = r + radius * 2 * dt
+
+		local desiredVel = polarToVec(angle + (entity.direction or 0), angularSpeed * r)
+
+		applySteering(entity, desiredVel, 20)
+	end
+end
+
+---@param returnSpeed number
+---@param timing number
+---@param force? number
+---@return MovementFunc
+-- um movimento de boomerangue: a entidade se move na direção do ataque, e depois de um certo tempo retorna para o atacante
+function boomerangMovement(returnSpeed, timing, force)
+	timing = timing or 0.5
+
+	return function(entity, dt)
+		if entity.age < timing then
+			return
+		end
+
+		local dir = subVec(entity.attacker.pos, entity.pos)
+
+		if lenVec(dir) < 50 and entity.active then
+			entity.atk.weapon.ammo = 1
+			entity.atk.weapon.visible = true
+			entity:destroy()
+			return
+		end
+
+		local desiredVel = scaleVec(normalize(dir), returnSpeed)
+		applySteering(entity, desiredVel, force or 1)
 	end
 end
 
@@ -111,15 +179,15 @@ function avoidTargetMovement(safeDistance, duration, baseCooldown, angleVar, eas
 			return
 		end
 
-		if not entity.target then
+		if not entity.moveTargeting then
 			return
 		end
 
 		-- se estiver perto e não estiver em fuga, começa a fuga
 		if not escapeDir then
-			local d = dist(entity.pos, entity.target.pos)
+			local d = dist(entity.pos, entity.moveTargeting.targetPos)
 			if d < safeDistance then
-				escapeDir = normalize(subVec(entity.pos, entity.target.pos))
+				escapeDir = normalize(subVec(entity.pos, entity.moveTargeting.targetPos))
 				escapeDir = rotateVec(escapeDir, math.random(-angleVar, angleVar))
 				timer = 0
 			end
@@ -143,15 +211,17 @@ end
 
 ---@param duration number
 ---@param baseCooldown number
----@param angleVariance? rad
 ---@param easingFunc easingFunc
+---@param angleVariance? rad
+---@param forceFactor? number
 ---@return MovementFunc
-function dashToTargetMovement(duration, baseCooldown, angleVariance, easingFunc)
+function dashToTargetMovement(duration, baseCooldown, easingFunc, angleVariance, forceFactor)
 	local angleVar = angleVariance or 0
 	local timer = 0
 	local cooldown = baseCooldown
 	local dur = duration or 1.0
 	local dashDir = nil
+	local force = forceFactor or 1
 
 	return function(entity, dt)
 		if cooldown > 0 then
@@ -160,8 +230,8 @@ function dashToTargetMovement(duration, baseCooldown, angleVariance, easingFunc)
 		end
 
 		-- inicio do dash
-		if not dashDir and entity.target then
-			dashDir = normalize(subVec(entity.target.pos, entity.pos))
+		if not dashDir and entity.moveTargeting.validTarget then
+			dashDir = normalize(subVec(entity.moveTargeting.targetPos, entity.pos))
 			dashDir = rotateVec(dashDir, math.random(-angleVar, angleVar))
 			timer = 0
 		end
@@ -170,7 +240,7 @@ function dashToTargetMovement(duration, baseCooldown, angleVariance, easingFunc)
 			timer = timer + dt
 			-- o easing controla o multiplicador da força
 			local t = math.min(timer / dur, 1)
-			local intensity = easingFunc(1 - t)
+			local intensity = easingFunc(1 - t) * force
 			local forceMag = entity.speed * entity.friction * entity.mass * 10 * intensity
 
 			applyForce(entity, scaleVec(dashDir, forceMag))
@@ -183,14 +253,61 @@ function dashToTargetMovement(duration, baseCooldown, angleVariance, easingFunc)
 	end
 end
 
-function randomMovement(duration, baseCooldown, bonusSpeed, easingFunc)
-	local changeInterval = 0.25
-	local time = 0
-	local cooldown = baseCooldown
-	local randomAngle = math.random() * 2 * math.pi
-	easingFunc = easingFunc or function(t)
-		return t
+---@param jumpDuration number
+---@param restDuration number
+---@param jumpForce number
+---@param easingFunc function
+---@param sync number
+---@return MovementFunc
+function jumpToTargetMovement(jumpDuration, restDuration, jumpForce, easingFunc, sync)
+	local timer = sync or 0.0
+	local isJumping = false
+	local jumpDir = nil
+
+	return function(entity, dt)
+		if not entity.moveTargeting or not entity.moveTargeting.validTarget then
+			return
+		end
+
+		timer = timer + dt
+
+		if isJumping then
+			-- fase do pulo
+			local t = math.min(timer / jumpDuration, 1)
+			local intensity = easingFunc(1 - t)
+			local forceMag = entity.speed * entity.friction * entity.mass * jumpForce * intensity
+
+			if jumpDir then
+				applyForce(entity, scaleVec(jumpDir, forceMag))
+			end
+
+			-- verifica se o pulo acabou
+			if t >= 1 then
+				isJumping = false
+				timer = 0
+				jumpDir = nil
+			end
+		else
+			-- fase de preparo para o próximo pulo
+			if timer >= restDuration then
+				isJumping = true
+				timer = 0
+				-- trava a direção do pulo no exato momento em que ele sai do chão
+				jumpDir = normalize(subVec(entity.moveTargeting.targetPos, entity.pos))
+			end
+		end
 	end
+end
+
+---@param duration number
+---@param baseCooldown number
+---@param moveBuilder fun(): MovementFunc
+---@return MovementFunc
+function randomMovement(duration, baseCooldown, moveBuilder)
+	local time = 0
+	local age = 0
+	local cooldown = baseCooldown
+	local move = moveBuilder()
 
 	return function(entity, dt)
 		if cooldown > 0 then
@@ -198,16 +315,41 @@ function randomMovement(duration, baseCooldown, bonusSpeed, easingFunc)
 			return
 		end
 
+		age = age + dt
 		time = time + dt
-		local t = math.min(time / duration, 1)
-		local intensity = easingFunc(1 - t)
 
-		if time >= changeInterval then
-			time = time - changeInterval
-			randomAngle = math.random() * 2 * math.pi
+		if age > duration then
+			applySteering(entity, vec(0, 0), 10)
+			return
 		end
 
-		local desiredVel = polarToVec(randomAngle, entity.speed * bonusSpeed * intensity)
-		applySteering(entity, desiredVel, 10)
+		move(entity, dt)
 	end
+end
+
+---@param force? number
+---@return MovementFunc
+function followTargetMovement(force)
+	force = force or 10
+	return function(entity, dt)
+		if not entity.moveTargeting or not entity.moveTargeting.validTarget then
+			return
+		end
+
+		local dir = subVec(entity.moveTargeting.targetPos, entity.pos)
+		local desiredVel = scaleVec(normalize(dir), entity.speed)
+
+		applySteering(entity, desiredVel, force)
+	end
+end
+
+function followTarget(entity, dt)
+	if not entity.moveTargeting then
+		return
+	end
+
+	local dir = subVec(entity.moveTargeting.targetPos, entity.pos)
+	local desiredVel = scaleVec(normalize(dir), entity.speed * 2)
+
+	applySteering(entity, desiredVel, 10)
 end

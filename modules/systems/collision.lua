@@ -51,7 +51,7 @@ function hitboxes(default, solids, triggers)
 	}
 end
 
----@param hbs Hitboxes
+---@param hbs? Hitboxes
 -- retorna uma cópia da tabela de hitboxes `hbs`
 function copyHitboxes(hbs)
 	local newHbs = {
@@ -59,6 +59,10 @@ function copyHitboxes(hbs)
 		solids = {},
 		triggers = {},
 	}
+
+	if not hbs then
+		return newHbs
+	end
 
 	for _, hb in ipairs(hbs.default) do
 		table.insert(newHbs.default, copyHitbox(hb))
@@ -471,8 +475,8 @@ function applyContactImpulse(entityA, entityB, normal, restitution)
 	local vA = entityA.vel
 	local vB = entityB.vel
 
-	local mA = entityA.mass
-	local mB = entityB.mass
+	local mA = (not entityA.mass or entityA.mass == 0) and math.huge or entityA.mass
+	local mB = (not entityB.mass or entityB.mass == 0) and math.huge or entityB.mass
 
 	-- coeficiente de restituição efetivo (0 = inelástico, 1 = elástico)
 	local rest = restitution or 0

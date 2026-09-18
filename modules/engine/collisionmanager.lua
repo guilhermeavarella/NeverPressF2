@@ -24,8 +24,10 @@ function CollisionManager.init()
 	local cm = setmetatable({}, CollisionManager)
 
 	cm.registry = cm:startRegistry() -- tabela mestre de hitboxes registradas
-	cm.roomsDirty = false -- flag para indicar se as listas de hitboxes precisam ser atualizadas
-	cm.solids = {} -- hitboxes sólidas
+	cm.roomsDirty = false         -- flag para indicar se as listas de hitboxes precisam ser atualizadas
+	cm.solids = {}                -- tabela que liga entidades com seus hitboxes sólidos
+	cm.solidList = {}             -- lista com índices numéricos de hitboxes sólidas
+	cm.solidIndices = {}          -- mapa de entidade para índice da lista `solids`
 
 	-- otimização: manter uma cópia das salas ativas
 	-- para minimizar o número de colisões checadas
@@ -77,7 +79,9 @@ function CollisionManager:fetchHitboxesByRoom(room)
 		if enemy.state ~= DYING then
 			for _, attack in pairs(enemy.atk) do
 				for _, atkEvent in pairs(attack.events) do
-					self:register(atkEvent)
+					if atkEvent.active then
+						self:register(atkEvent)
+					end
 				end
 			end
 			self:register(enemy)
@@ -96,8 +100,8 @@ function CollisionManager:fetchHitboxesByRoom(room)
 		self:register(inter)
 	end
 
-	-- pegando hitboxes de interativos
-	for _, door in pairs(room.doors) do
+	-- pegando hitboxes de portas
+	for _, door in pairs(room:getDoors()) do
 		self:register(door)
 	end
 
@@ -114,6 +118,11 @@ function CollisionManager:fetchHitboxesByRoom(room)
 	-- pegando hitboxes de obstáculos
 	for _, obs in pairs(room.obstacles) do
 		self:register(obs)
+	end
+
+	-- pegando hitboxes de paredes
+	for _, wall in pairs(room:getWalls()) do
+		self:register(wall)
 	end
 end
 
@@ -151,7 +160,7 @@ function CollisionManager:clearHitboxesByRoom(room)
 	end
 
 	-- removendo hitboxes de portas
-	for _, door in pairs(room.doors) do
+	for _, door in pairs(room:getDoors()) do
 		self:unregister(door)
 	end
 
@@ -170,7 +179,10 @@ function CollisionManager:clearHitboxesByRoom(room)
 		self:unregister(obs)
 	end
 
-
+	-- removendo hitboxes de paredes
+	for _, wall in pairs(room:getWalls()) do
+		self:unregister(wall)
+	end
 end
 
 -- verifica se as listas de hitboxes precisam ser atualizadas
@@ -210,6 +222,11 @@ function CollisionManager:register(entity)
 	end
 
 	if entity.hb.solids and #entity.hb.solids > 0 then
+		-- só insere no array se ainda não existir
+		if not self.solidIndices[entity] then
+			table.insert(self.solidList, entity)
+			self.solidIndices[entity] = #self.solidList
+		end
 		self.solids[entity] = entity.hb.solids
 	end
 
@@ -226,6 +243,19 @@ function CollisionManager:unregister(entity)
 	end
 
 	if data.solids and #data.solids > 0 then
+		local idx = self.solidIndices[entity]
+		if idx then
+			-- pega o último elemento da lista
+			local lastEntity = self.solidList[#self.solidList]
+
+			-- o último elemento toma a posição do elemento que está sendo removido
+			self.solidList[idx] = lastEntity
+			self.solidIndices[lastEntity] = idx
+
+			-- limpa a última posição (agora duplicada) e o índice da entidade apagada
+			self.solidList[#self.solidList] = nil
+			self.solidIndices[entity] = nil
+		end
 		self.solids[entity] = nil
 	end
 
@@ -360,10 +390,6 @@ function CollisionManager:handleCollisions()
 				hitSomeInteractive = true
 			end
 		end
-
-		-- if not hitSomeInteractive and player.interactiveObj and player.interactiveObj.type == INTERACTIVE then
-		-- 	self:onPlayerInteractiveExit(player, player.interactiveObj)
-		-- end
 	end
 
 	--------- PLAYER / INIMIGO ----------
@@ -394,7 +420,7 @@ function CollisionManager:handleCollisions()
 			local hit = checkColision(destrhb.default, destr, attackhb.default, attack)
 
 			if hit then
-				self:onPlayerDestructible(attack, destr)
+				self:onAttackDestructible(attack, destr)
 			end
 		end
 	end
@@ -423,48 +449,79 @@ end
 ---@param nextPos Vec
 ---@return Vec correctedPos
 function CollisionManager:resolveSolidCollisions(entity, nextPos)
-	local finalPos = vec(nextPos.x, nextPos.y)
-	local collisionsDetected = 0
+	local finalPos = vec(entity.pos.x, entity.pos.y)
 
-	-- executa múltiplas passadas para resolver colisões em canto
-	for _ = 1, 5 do
-		-- itera sobre todas as entidades sólidas registradas
-		for solid, solidhbs in pairs(self.solids) do
-			if solid == entity then
-				goto nextsolid
-			end
-			-- para cada hitbox "default" da minha entidade
-			for _, entityhb in ipairs(entity.hb.default) do
-				local desiredhb = buildWorldHitbox(entityhb, finalPos)
+	-- registro para garantir que callbacks (como onAttackObstacle) rodem apenas 1x por sólido
+	local solidsHit = {}
 
-				-- contra cada hitbox sólida do outro objeto
-				for _, solidhb in ipairs(solidhbs) do
-					local worldSolidhb = buildWorldHitbox(solidhb, solid.pos)
-					local manifold = getCollisionManifold(desiredhb, worldSolidhb)
+	-- separamos o movimento em dois eixos para evitar o "Seam Catching"
+	-- primeiro movemos apenas em X e resolvemos colisões
+	-- depois movemos apenas em Y (com o X já corrigido) e resolvemos colisões
+	local steps = {
+		{ isX = true,  pos = vec(nextPos.x, entity.pos.y) },
+		{ isX = false, pos = vec(0, nextPos.y) },
+	}
 
-					if manifold then
-						if collisionsDetected == 0 then
-							self:handleSolidCollisions(entity, solid)
-						end
-
-						collisionsDetected = collisionsDetected + 1
-						-- resolve a posição (Empurra para fora)
-						local pushOut = scaleVec(manifold.normal, manifold.depth)
-						finalPos = addVec(finalPos, pushOut)
-						-- Atualiza a hitbox para a nova posição (para a próxima iteração do loop i)
-						desiredhb = buildWorldHitbox(entityhb, finalPos)
-
-						-- para sólidos dinâmicos aplicamos impulso de contato obedecendo a 3ª lei.
-						local normalEntityToSolid = scaleVec(manifold.normal, -1)
-						applyContactImpulse(entity, solid, normalEntityToSolid, 1)
-					end
-				end
-			end
-			::nextsolid::
+	local pushOut = vec(0, 0) -- inicializando uma vez só aqui fora para reduzir alocações de vetores
+	for _, step in ipairs(steps) do
+		if not step.isX then
+			-- no passo Y, herdamos o X seguro que calculamos no passo anterior
+			step.pos.x = finalPos.x
 		end
 
-		if collisionsDetected == 0 then
-			break
+		finalPos = vec(step.pos.x, step.pos.y)
+
+		for _ = 1, 5 do
+			local collisionsDetected = 0
+
+			for i = 1, #self.solidList do
+				local solid = self.solidList[i]
+				local solidhbs = self.solids[solid]
+
+				if solid == entity then
+					goto nextsolid
+				end
+
+				for _, entityhb in ipairs(entity.hb.default) do
+					local desiredhb = buildWorldHitbox(entityhb, finalPos)
+
+					for _, solidhb in ipairs(solidhbs) do
+						local worldSolidhb = buildWorldHitbox(solidhb, solid.pos)
+						local manifold = getCollisionManifold(desiredhb, worldSolidhb)
+
+						if manifold then
+							if collisionsDetected == 0 and not solidsHit[solid] then
+								self:handleSolidCollisions(entity, solid)
+								solidsHit[solid] = true
+							end
+
+							collisionsDetected = collisionsDetected + 1
+
+							pushOut.x = manifold.normal.x * (manifold.depth + 0.01)
+							pushOut.y = manifold.normal.y * (manifold.depth + 0.01)
+
+							-- isso impede que uma parede lateral empurre o jogador para cima/baixo na quina
+							if step.isX then
+								pushOut.y = 0
+							else
+								pushOut.x = 0
+							end
+
+							finalPos.x = finalPos.x + pushOut.x
+							finalPos.y = finalPos.y + pushOut.y
+							desiredhb = buildWorldHitbox(entityhb, finalPos)
+
+							local normalEntityToSolid = scaleVec(manifold.normal, -1)
+							applyContactImpulse(entity, solid, normalEntityToSolid, 1)
+						end
+					end
+				end
+				::nextsolid::
+			end
+
+			if collisionsDetected == 0 then
+				break
+			end
 		end
 	end
 
@@ -480,12 +537,8 @@ function CollisionManager:onPlayerRoom(player, room)
 
 	-- se mudou de sala, se retira dela e entra na próxima
 	if prevRoom and prevRoom ~= room then
-		-- print("Player entered room: " .. vecToString(room.arrPos))
-
-		prevRoom.playersInRoom:remove(player.id)
-		prevRoom:verifyIsEmpty()
-
-		room:visit(player)
+		prevRoom:onPlayerExit(player)
+		room:onPlayerEnter(player)
 	end
 end
 
@@ -507,7 +560,7 @@ function CollisionManager:onEnemyHitByPlayerAttack(enemy, attack)
 		return
 	end
 
-	attack.targetsDamaged[enemy] = true
+	attack.targetsDamaged[enemy] = { timer = attack.tick }
 	attack.piercesLeft = attack.piercesLeft - 1
 
 	if enemy.invulnerableTimer > 0 then
@@ -515,8 +568,9 @@ function CollisionManager:onEnemyHitByPlayerAttack(enemy, attack)
 	end
 
 	applyImpulse(enemy, scaleVec(normalize(subVec(enemy.pos, attack.pos)), attack.mass * 1000))
-	enemy:setInvulnerable(0.5)
 	enemy:takeDamage(attack.dmg)
+	attack.attacker.blessingManager:dispatch(TP_ON_ATTACK_ENEMY, { enemy = enemy, attack = attack })
+	attack:onHit(enemy)
 end
 
 ---@param enemy Enemy
@@ -524,21 +578,31 @@ end
 -- trata a colisão entre um `enemy` e um `player`
 function CollisionManager:onEnemyPlayer(enemy, player)
 	-- dano de contato
-	player:takeDamage(10)
+	if not player.invisible then
+		player:takeDamage(10)
+	end
 end
 
 ---@param player Player
 ---@param attack AtkEvent
 -- trata a colisão entre um `player` e um `attack` inimigo
 function CollisionManager:onPlayerHitByEnemyAttack(player, attack)
-	if not attack.active then
+	if not attack.active or player.invisible then
 		return
 	end
+	local ctx = { attack = attack, player = player }
+	player.blessingManager:dispatch(TP_ON_ATTACK_PLAYER, ctx)
+
+	if ctx.result == BS_REFLECT then
+		attack:reflect(player)
+		return
+	end
+
 	if attack.targetsDamaged[player] then
 		return
 	end
 
-	attack.targetsDamaged[player] = true
+	attack.targetsDamaged[player] = { timer = attack.tick }
 	attack.piercesLeft = attack.piercesLeft - 1
 
 	if not player:takeDamage(attack.dmg) then
@@ -567,7 +631,17 @@ end
 ---@param destructible Destructible
 -- trata a colisão entre um `player` ou um `attack` do player e um `destructible`
 function CollisionManager:onPlayerDestructible(_, destructible)
-	destructible:damage(math.huge)
+	if destructible.fragility == FRAGILE then
+		destructible:damage(math.huge)
+	elseif destructible.fragility == UNSTABLE then
+		destructible:destabilize()
+	end
+end
+
+---@param destructible Destructible
+-- trata a colisão entre um `player` ou um `attack` do player e um `destructible`
+function CollisionManager:onAttackDestructible(_, destructible)
+	destructible:damage(math.huge) -- !WARNING: mudar para ser o dano do ataque
 end
 
 ---@param player Player
@@ -601,6 +675,5 @@ end
 ---@param obstacle Obstacle
 -- trata a colisão entre um ataque e um obstáculo
 function CollisionManager:onAttackObstacle(attack, obstacle)
-	print("Ataque colidiu com um obstáculo!")
 	attack:reduceBounces()
 end

@@ -10,6 +10,7 @@
 ---@field hb Hitboxes
 ---@field state string
 ---@field selected boolean
+---@field inUse boolean
 ---@field spriteSheets table
 ---@field animations table
 
@@ -21,7 +22,7 @@ UIElement.type = UI_ELEMENT
 ---@param elementType Type
 ---@param pos Vec
 ---@param size Size
----@param hitboxes Hitboxes
+---@param hitboxes? Hitboxes
 -- inicializa um elemento de UI com estado `IDLE` e selected = `false`
 function UIElement:init(name, elementType, pos, size, hitboxes)
 	self.name = name
@@ -31,6 +32,7 @@ function UIElement:init(name, elementType, pos, size, hitboxes)
 	self.hb = hitboxes
 	self.state = IDLE
 	self.selected = false
+	self.inUse = false
 	self.spriteSheets = {}
 	self.animations = {}
 	return self
@@ -48,6 +50,10 @@ end
 ---@param dt number
 -- atualiza a animação do elemento de UI
 function UIElement:update(dt)
+	if not self.animations[self.state] then
+		return
+	end
+
 	self.animations[self.state]:update(dt)
 end
 
@@ -60,23 +66,47 @@ end
 -- marca o elemento de UI como não selecionado e seu estado como `IDLE`
 function UIElement:deselect()
 	self.selected = false
-	self.animations[self.state]:reset()
+	if self.animations[self.state] then
+		self.animations[self.state]:reset()
+	end
 	self.state = IDLE
+end
+
+-- define se o elemento representa algo que está em uso, sem alterar seu estado visual.
+function UIElement:setInUse(inUse)
+	self.inUse = inUse
 end
 
 ---@param camera Camera
 -- renderiza o elemento de UI
 function UIElement:draw(camera)
-	local viewPos = self.pos
+	local viewX = self.pos.x
+	local viewY = self.pos.y
 	if camera then
-		viewPos = camera:viewPos(self.pos)
+		viewX, viewY = camera:viewPos(self.pos)
 	end
 	local anim = self.animations[self.state]
-	local quad = anim.frames[anim.currFrame]
+	if not anim then
+		return
+	end
 	local scale = self.size.width / anim.frameDim.width
-	local offset = {
-		x = anim.frameDim.width / 2,
-		y = anim.frameDim.height / 2,
-	}
-	love.graphics.draw(self.spriteSheets[self.state], quad, viewPos.x, viewPos.y, 0, scale, scale, offset.x, offset.y)
+	local offsetX = anim.frameDim.width / 2
+	local offsetY = anim.frameDim.height / 2
+	if self.inUse then
+		love.graphics.setShader(brightnessShader)
+		brightnessShader:send("brightness", 1.75)
+	end
+
+	love.graphics.draw(
+		self.spriteSheets[self.state],
+		anim.frames[anim.currFrame],
+		viewX,
+		viewY,
+		0,
+		scale,
+		scale,
+		offsetX,
+		offsetY
+	)
+	love.graphics.setShader()
 end

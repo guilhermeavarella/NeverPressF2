@@ -270,7 +270,6 @@ function dirPathFormat(parts)
 	for i = 2, #parts, 1 do
 		path = path .. "/" .. pathlizeName(parts[i])
 	end
-	print(path)
 	return path
 end
 
@@ -289,6 +288,48 @@ function pngPathFormat(parts)
 	return path
 end
 
+---@param parts string[]
+---@return string
+-- transforma uma lista de pastas e um nome de arquivo em um caminho para o arquivo
+function oggPathFormat(parts)
+	local path = ""
+	for i, v in ipairs(parts) do
+		if i ~= #parts then
+			path = path .. pathlizeName(v) .. "/"
+		else
+			path = path .. pathlizeName(v) .. ".ogg"
+		end
+	end
+	return path
+end
+
+---@param parts string[]
+---@return string
+-- transforma uma lista de pastas e um nome de arquivo em um caminho para o arquivo
+function wavPathFormat(parts)
+	local path = ""
+	for i, v in ipairs(parts) do
+		if i ~= #parts then
+			path = path .. pathlizeName(v) .. "/"
+		else
+			path = path .. pathlizeName(v) .. ".wav"
+		end
+	end
+	return path
+end
+
+----------------------------------------
+-- Estados
+----------------------------------------
+
+function isMovementState(state)
+	return state == MOVING
+		or state == WALKING_LEFT
+		or state == WALKING_DOWN
+		or state == WALKING_RIGHT
+		or state == WALKING_UP
+end
+
 ----------------------------------------
 -- Funções de Debug
 ----------------------------------------
@@ -299,4 +340,30 @@ function debugTable(tableName, table)
 		print(tostring(k) .. " = " .. tostring(v))
 	end
 	print("----------------------------------")
+end
+
+--------------------------------------
+--- Angles
+-------------------------------------
+
+function invertSecondAndThirdQuadrants(angle)
+	return (angle <= -math.pi / 2 or angle >= math.pi / 2) and -1 or 1
+end
+
+function invertFirstAndSecondQuadrants(angle)
+	return (angle <= 0 and angle >= -math.pi) and -1 or 1
+end
+
+function flipSecondAndThirdQuadrants(angle)
+	return sign(angle) * (math.pi / 2 - math.abs(math.abs(angle) - math.pi / 2))
+end
+
+-----------------------------------------
+--- Strings
+-----------------------------------------
+
+---@param prefix string
+---@return boolean
+function string:startsWith(prefix)
+	return self:sub(1, #prefix) == prefix
 end

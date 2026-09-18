@@ -50,24 +50,24 @@ function Camera.new(pos, viewport, canvas, canvasPos, player)
 	local camera = setmetatable({}, Camera)
 
 	camera.playerAttached = player -- jogador associado à câmera
-	camera.target = player      -- alvo que a câmera segue (inicialmente o player)
-	camera.viewport = viewport  -- tamanho da câmera (o espaço que ela enxerga)
-	camera.canvas = canvas      -- canvas associado à câmera
+	camera.target = player -- alvo que a câmera segue (inicialmente o player)
+	camera.viewport = viewport -- tamanho da câmera (o espaço que ela enxerga)
+	camera.canvas = canvas -- canvas associado à câmera
 	camera.canvasPos = canvasPos -- posição do canvas na tela
 	camera.cx = pos.x
 	camera.cy = pos.y
 	camera.targetPos = { x = pos.x, y = pos.y } -- onde a câmera deve ir
 	-- atributos fixos na instanciação
-	camera.transitionSpeed = 6               -- controla a suavidade da transição
-	camera.shakeOffset = { x = 0, y = 0 }    -- deslocamento atual do shake
-	camera.shakeIntensity = 0                -- intensidade do shake
-	camera.shakeDuration = 0                 -- duração total do shake
-	camera.shakeTimer = 0                    -- tempo restante do shake
+	camera.transitionSpeed = 6 -- controla a suavidade da transição
+	camera.shakeOffset = { x = 0, y = 0 } -- deslocamento atual do shake
+	camera.shakeIntensity = 0 -- intensidade do shake
+	camera.shakeDuration = 0 -- duração total do shake
+	camera.shakeTimer = 0 -- tempo restante do shake
 	-- atributos de zoom
 	camera.startingZoom = camera:calculateZoom()
 	camera.zoom = camera.startingZoom + 0.1
 	camera.targetZoom = camera.startingZoom -- zoom desejado
-	camera.zoomSpeed = 3                 -- velocidade da transição
+	camera.zoomSpeed = 3 -- velocidade da transição
 	-- atributos de cinemática
 	camera.cinematicTimer = 0
 
@@ -102,6 +102,7 @@ function Camera:updatePosition(dt)
 
 			if room then
 				-- limita a posição da câmera ao hitbox da sala
+				-- no caso da limitação vertical, permitimos que veja um pouco mais acima para não cortar a parede e porta
 				self.targetPos.x = clamp(
 					self.target.pos.x,
 					room.limits.p1.x - Room.spacingH / 2 + viewportZoomed.width / 2,
@@ -109,7 +110,7 @@ function Camera:updatePosition(dt)
 				)
 				self.targetPos.y = clamp(
 					self.target.pos.y,
-					room.limits.p1.y + viewportZoomed.height / 2,
+					room.limits.p1.y + viewportZoomed.height / 2 - 180,
 					room.limits.p2.y - Room.spacingV / 2 - viewportZoomed.height / 2
 				)
 			end
@@ -194,10 +195,9 @@ end
 -- retorna a posição da entidade dada pelo parâmetro `entityPos`
 -- no frame de referência relativo à posição da câmera
 function Camera:viewPos(entityPos)
-	return {
-		x = entityPos.x - self.cx + self.viewport.width / 2,
-		y = entityPos.y - self.cy + self.viewport.height / 2,
-	}
+	local vx = entityPos.x - self.cx + self.viewport.width / 2
+	local vy = entityPos.y - self.cy + self.viewport.height / 2
+	return vx, vy
 end
 
 ----------------------------------------
@@ -208,7 +208,7 @@ end
 -- associado à ela
 function Camera:draw()
 	love.graphics.setCanvas(self.canvas)
-	love.graphics.clear(0.0, 0.0, 0.0, 1.0)
+	love.graphics.clear(25 / 255, 21 / 255, 83 / 255, 1.0)
 	love.graphics.push()
 
 	-- centraliza o zoom
@@ -222,11 +222,15 @@ function Camera:draw()
 	renderEntities(self)
 	-- renderiza as hitboxes ativas (debug)
 	renderHitboxes(self)
+	-- renderiza pós-processamento
+	renderLighting(self)
 	-- renderiza caixas de diálogo por cima de tudo
 	renderDialogues(self)
 
 	love.graphics.pop()
 
+	-- renderiza o degradê escuro na borda da câmera
+	renderVignette(self)
 	-- barras pretas em espaço de tela (fora do canvas/zoom)
 	renderBlackBars(self)
 	-- renderiza a UI do jogador associado
@@ -308,7 +312,7 @@ function newCameras()
 	cameras = {}
 
 	for i = 1, numOfCams do
-		if numOfCams <= 3 then
+		if numOfCams <= 2 then
 			local camera = Camera.new(
 				players[i].pos,
 				{ width = window.width / numOfCams, height = window.height },
@@ -320,13 +324,18 @@ function newCameras()
 				transferCameraState(camera, oldCameras[i])
 			end
 			table.insert(cameras, camera)
-		else -- no caso de 4 câmeras
-			local canvasPositions = {
-				{ x = 0,                y = 0 },
-				{ x = window.width / 2, y = 0 },
-				{ x = 0,                y = window.height / 2 },
-				{ x = window.width / 2, y = window.height / 2 },
-			}
+		else
+			local canvasPositions = {}
+			if numOfCams == 3 then
+				canvasPositions[1] = { x = window.width / 4, y = 0 }
+				canvasPositions[2] = { x = 0, y = window.height / 2 }
+				canvasPositions[3] = { x = window.width / 2, y = window.height / 2 }
+			else
+				canvasPositions[1] = { x = 0, y = 0 }
+				canvasPositions[2] = { x = window.width / 2, y = 0 }
+				canvasPositions[3] = { x = 0, y = window.height / 2 }
+				canvasPositions[4] = { x = window.width / 2, y = window.height / 2 }
+			end
 			local camera = Camera.new(
 				players[i].pos,
 				{ width = window.width / 2, height = window.height / 2 },

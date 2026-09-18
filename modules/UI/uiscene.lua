@@ -15,8 +15,10 @@ ELEM_LAYER_2 = 6
 
 ---@class UIScene
 ---@field subtype Type
----@field controls table
 ---@field active boolean
+---@field player Player?
+---@field hasBg boolean
+---@field controls Controls
 ---@field selectionPos Vec
 ---@field layers table<_, table<_, UIElement>>[]
 
@@ -26,17 +28,15 @@ UIScene.type = UI_SCENE
 
 ---@param sceneType Type
 ---@param player any
+---@param hasBg? boolean
 ---@return table
 -- cria uma nova cena de UI com um subtipo e com os controles do `player`
-function UIScene.new(sceneType, player)
+function UIScene.new(sceneType, player, hasBg)
 	local uiscene = setmetatable({}, UIScene)
 	uiscene.subtype = sceneType
 	uiscene.player = player
-	if player then
-		uiscene.controls = player.controls
-	else
-		uiscene.controls = { up = "w", left = "a", down = "s", right = "d", act1 = "space", act2 = "lshift" }
-	end
+	uiscene.controls = player and player.controls or _newDefaultControl()
+	uiscene.hasBg = hasBg
 	uiscene.active = false
 	uiscene.selectionPos = vec(math.huge, math.huge)
 	uiscene.layers = { {}, {}, {}, {}, {}, {} }
@@ -88,6 +88,11 @@ end
 ---@param dt number
 -- atualiza cada um dos elementos de UI desta cena
 function UIScene:update(dt)
+	-- se tiver um player, podemos confiar que ele já deu o update
+	if not self.player then
+		self.controls:update(dt)
+	end
+
 	for i = 1, #self.layers do
 		local layer = self.layers[i]
 		for _, row in pairs(layer) do
@@ -100,7 +105,9 @@ end
 
 -- desenha cada um dos elementos de UI desta cena
 function UIScene:draw()
-	love.graphics.clear(0.0, 0.0, 0.0, 0.3)
+	if self.hasBg then
+		love.graphics.clear(0.0, 0.0, 0.0, 0.3)
+	end
 	for i = 1, #self.layers do
 		local layer = self.layers[i]
 		for _, row in pairs(layer) do
@@ -111,64 +118,30 @@ function UIScene:draw()
 	end
 end
 
-function UIScene:keypressed(key, isrepeat)
+---@param key string
+function UIScene:handleInput(key)
+	-- lidando com movimentação pela UI
+	local dir = vec(0, 0)
+	if self.controls:justPressed(ACT_MU) then
+		dir.y = dir.y - 1
+	elseif self.controls:justPressed(ACT_MD) then
+		dir.y = dir.y + 1
+	elseif self.controls:justPressed(ACT_ML) then
+		dir.x = dir.x - 1
+	elseif self.controls:justPressed(ACT_MR) then
+		dir.x = dir.x + 1
+	end
+
 	-- camadas que possuem interação (botões, itens, etc.)
 	local interactionLayers = { ELEM_LAYER_1, ELEM_LAYER_2 }
 
-	-- acha o elemento mais próximo da coluna `column` na linha `row`
-	local function closestElemInRow(row, col)
-		for _, l in pairs(interactionLayers) do
-			local smallestDif = math.huge
-			local closestEl = nil
-			local closestElPos = nil
-			if self.layers[l][row] then
-				for i, el in pairs(self.layers[l][row]) do
-					if math.abs(col - i) < smallestDif then
-						smallestDif = math.abs(col - i)
-						closestEl = el
-						closestElPos = vec(i, row)
-					end
-				end
-			end
-			return closestEl, closestElPos
-		end
-	end
-
-	-- acha o elemento mais próximo da linha `row` na coluna `column`
-	local function closestElemInColumn(col, row)
-		for _, l in pairs(interactionLayers) do
-			local smallestDif = math.huge
-			local closestEl = nil
-			local closestElPos = nil
-			for i, r in pairs(self.layers[l]) do
-				if r[col] then
-					if math.abs(row - i) < smallestDif then
-						smallestDif = math.abs(row - i)
-						closestEl = r[col]
-						closestElPos = vec(col, i)
-					end
-				end
-			end
-			return closestEl, closestElPos
-		end
-	end
-
-	-- lidando com movimentação pela UI
-	local moveMap = {
-		[self.controls.up] = vec(0, -1),
-		[self.controls.down] = vec(0, 1),
-		[self.controls.left] = vec(-1, 0),
-		[self.controls.right] = vec(1, 0),
-	}
-
-	local dir = moveMap[key]
-	if dir then
+	if not nullVec(dir) then
 		local targetPos = addVec(self.selectionPos, dir)
 		local closestEl = nil
 		if dir.y ~= 0 then
-			closestEl, targetPos = closestElemInRow(targetPos.y, targetPos.x)
+			closestEl, targetPos = self:closestElemInRow(targetPos.y, targetPos.x)
 		elseif dir.x ~= 0 then
-			closestEl, targetPos = closestElemInColumn(targetPos.x, targetPos.y)
+			closestEl, targetPos = self:closestElemInColumn(targetPos.x, targetPos.y)
 		end
 
 		if closestEl then
@@ -200,12 +173,72 @@ function UIScene:keypressed(key, isrepeat)
 	end
 
 	-- lidando com cliques
-	if key == self.controls.act1 then
-		for _, l in ipairs(interactionLayers) do
+	if self.controls:checkAction(ACT_CON) then
+		for _, l in pairs(interactionLayers) do
 			local el = self.layers[l][self.selectionPos.y] and self.layers[l][self.selectionPos.y][self.selectionPos.x]
-			if el and el.subtype == UI_BUTTON_ELEM then
-				el.onClick(self)
+			if el and el.subtype == UI_BUTTON_ELEM and el.onClick then
+				el:onClick()
 			end
+		end
+	end
+
+	-- lidando com teclas especiais de textbox
+	if key and (key == "backspace" or key == "insert") then
+		for _, l in pairs(interactionLayers) do
+			local el = self.layers[l][self.selectionPos.y] and self.layers[l][self.selectionPos.y][self.selectionPos.x]
+			if el and el.subtype == UI_TEXTBOX_ELEM then
+				el:keyPressed(key)
+			end
+		end
+	end
+end
+
+-- acha o elemento mais próximo da linha `row` na coluna `column`
+function UIScene:closestElemInRow(row, col)
+	local interactionLayers = { ELEM_LAYER_1, ELEM_LAYER_2 }
+	for _, l in pairs(interactionLayers) do
+		local smallestDif = math.huge
+		local closestEl = nil
+		local closestElPos = nil
+		if self.layers[l][row] then
+			for i, el in pairs(self.layers[l][row]) do
+				if math.abs(col - i) < smallestDif then
+					smallestDif = math.abs(col - i)
+					closestEl = el
+					closestElPos = vec(i, row)
+				end
+			end
+		end
+		return closestEl, closestElPos
+	end
+end
+
+-- acha o elemento mais próximo da linha `row` na coluna `column`
+function UIScene:closestElemInColumn(col, row)
+	local interactionLayers = { ELEM_LAYER_1, ELEM_LAYER_2 }
+	for _, l in pairs(interactionLayers) do
+		local smallestDif = math.huge
+		local closestEl = nil
+		local closestElPos = nil
+		for i, r in pairs(self.layers[l]) do
+			if r[col] then
+				if math.abs(row - i) < smallestDif then
+					smallestDif = math.abs(row - i)
+					closestEl = r[col]
+					closestElPos = vec(col, i)
+				end
+			end
+		end
+		return closestEl, closestElPos
+	end
+end
+
+function UIScene:handleTextInput(t)
+	local interactionLayers = { ELEM_LAYER_1, ELEM_LAYER_2 }
+	for _, l in pairs(interactionLayers) do
+		local el = self.layers[l][self.selectionPos.y] and self.layers[l][self.selectionPos.y][self.selectionPos.x]
+		if el and el.subtype == UI_TEXTBOX_ELEM then
+			el:handleTextInput(t)
 		end
 	end
 end

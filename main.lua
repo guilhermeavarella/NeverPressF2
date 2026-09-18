@@ -3,29 +3,34 @@
 ----------------------------------------
 require("modules.constructors.dialogues")
 require("modules.constructors.uimanagers")
+require("modules.constructors.vfxs")
 require("modules.engine.animation")
 require("modules.engine.camera")
 require("modules.engine.collisionmanager")
 require("modules.engine.renderization")
 require("modules.engine.assetmanager")
+require("modules.engine.audiomanager")
 require("modules.entities.destructible")
 require("modules.entities.enemy")
 require("modules.entities.drop")
 require("modules.entities.player")
 require("modules.entities.room")
 require("modules.entities.weapon")
-require("modules.systems.dialogue")
 require("modules.tooling.roomcontrol")
+require("modules.tooling.spawnBlessing")
 require("modules.tooling.spawnDrop")
 require("modules.tooling.turtledebug")
 require("modules.tooling.fpsvisor")
+require("modules.systems.dialogue")
 require("modules.systems.shaders")
 require("game")
 require("table")
 
-local appleCake = require("libs.applecake")(true)
-appleCake.setBuffer(true)
-appleCake.beginSession()
+-- local appleCake = require("libs.applecake")(false)
+-- appleCake.setBuffer(false)
+-- appleCake.beginSession()
+
+-- local lurker = require("libs.lurker.lurker")
 
 ----------------------------------------
 -- Variáveis Globais
@@ -38,6 +43,8 @@ gameCtx = MENU_CTX
 local updateProfile
 local drawProfile
 
+lightLevels = 7
+
 ----------------------------------------
 -- Callbacks
 ----------------------------------------
@@ -48,12 +55,14 @@ function love.keypressed(key, scancode, isrepeat)
 		quitGame()
 	end
 
+	globalUIManager:handleInput(key)
 	for _, p in pairs(players) do
-		p.uiManager:keypressed(key, isrepeat)
+		p.uiManager:handleInput(key)
 	end
 
-	-- repassa para os UI managers
-	globalUIManager:keypressed(key, isrepeat)
+	if gameCtx ~= GAMEPLAY_CTX then
+		return
+	end
 
 	-- n adiciona um player ao jogo
 	if key == "n" then
@@ -70,11 +79,17 @@ function love.keypressed(key, scancode, isrepeat)
 	if key == "z" then
 		cameras[1].targetZoom = 2
 	end
+	-- x tira vida do player 1 (teste)
+	if key == "x" then
+		players[1]:takeDamage(10)
+	end
 
 	if _roomCondition() then
 		_roomDebugHandler(key)
 	elseif _spawnDropCondition() then
 		_spawnDropDebugHandler(key)
+	elseif _spawnBlessingCondition() then
+		_spawnBlessingDebugHandler(key)
 	else
 		_turtleDebugHandler(key)
 		if key == "0" then
@@ -82,20 +97,25 @@ function love.keypressed(key, scancode, isrepeat)
 		end
 	end
 
-	-------- FIM DEBUG --------
-
-	if not isrepeat then
-		for _, p in pairs(players) do
-			p:checkSpecialActions(key)
-			p:checkAction1(key)
-			p:checkAction2(key)
-		end
+	if key == "." then
+		lightLevels = lightLevels + 1
+	elseif key == "," then
+		lightLevels = lightLevels - 1
 	end
+
+	-------- FIM DEBUG --------
 end
 
 function love.keyreleased(key, scancode)
 	if key == "z" then
 		cameras[1].targetZoom = cameras[1].startingZoom
+	end
+end
+
+function love.textinput(t)
+	globalUIManager:handleTextInput(t)
+	for _, p in pairs(players) do
+		p.uiManager:handleTextInput(t)
 	end
 end
 
@@ -120,14 +140,28 @@ function love.load()
 	-- carregando o gerenciador de assets
 	assetManager = AssetManager.init()
 
+	-- carregando o gerenciador de áudios
+	globalAudioManager = AudioManager.new({
+		MUSIC_MENU,
+		MUSIC_LAYER1,
+		MUSIC_LAYER2,
+		MUSIC_LAYER3,
+	})
+
+	globalAudioManager:play(MUSIC_MENU)
+
 	-- carregando a biblioteca de UI
 	globalUIManager = initGlobalUIManager()
+
+	-- carregando o gerenciador de partículas
+	globalVFXManager = initGlobalVFXManager()
 
 	-- definindo a seed de aleatoriedade
 	math.randomseed(os.time())
 
 	-- definindo a fonte padrão do jogo
 	mushFont = love.graphics.newFont("assets/fonts/Tiny5-Regular.ttf", 16)
+	mushBigFont = love.graphics.newFont("assets/fonts/Tiny5-Regular.ttf", 32)
 	love.graphics.setFont(mushFont)
 
 	-- definindo as dimensões iniciais do jogo
@@ -145,8 +179,11 @@ end
 ----------------------------------------
 
 function love.update(dt)
+	-- lurker.update()
 	-- iniciando o profiling da função de update
-	updateProfile = appleCake.profileFunc(nil, updateProfile)
+	-- updateProfile = appleCake.profileFunc(nil, updateProfile)
+
+	dt = math.min(dt, 1/30)
 
 	-- pulando o update de gameplay enquanto está no menu
 	if gameCtx == MENU_CTX then
@@ -154,19 +191,21 @@ function love.update(dt)
 	end
 
 	DialogueManager:update(dt)
+	------------ Salas ------------
+	for _, r in activeRooms:iter() do
+		r:update(dt)
+	end
 	----------- Colisões ----------
 	collisionManager:update(dt)
 	---------- Jogadores ----------
 	for _, p in pairs(players) do
 		p:update(dt)
 	end
+	---------- Partículas ----------
+	globalVFXManager:update(dt)
 	----------- Cameras -----------
 	for _, c in pairs(cameras) do
 		c:updatePosition(dt)
-	end
-	------------ Salas ------------
-	for _, r in activeRooms:iter() do
-		r:update(dt)
 	end
 
 	-------------- UI -------------
@@ -175,7 +214,7 @@ function love.update(dt)
 	updateFPSVisor(dt)
 
 	-- encerrando o profiling
-	updateProfile:stop()
+	-- updateProfile:stop()
 end
 
 ----------------------------------------
@@ -184,7 +223,7 @@ end
 
 function love.draw()
 	-- iniciando o profiling da função de update
-	drawProfile = appleCake.profileFunc(nil, drawProfile)
+	-- drawProfile = appleCake.profileFunc(nil, drawProfile)
 
 	for _, c in pairs(cameras) do
 		c:draw()
@@ -197,8 +236,8 @@ function love.draw()
 	end
 
 	-- encerrando o profiling
-	drawProfile:stop()
-	appleCake.flush()
+	-- drawProfile:stop()
+	-- appleCake.flush()
 end
 
 ----------------------------------------
@@ -206,5 +245,5 @@ end
 ----------------------------------------
 
 function love.quit()
-	appleCake.endSession()
+	-- appleCake.endSession()
 end

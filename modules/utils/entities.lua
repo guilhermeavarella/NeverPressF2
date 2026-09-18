@@ -20,20 +20,40 @@ end
 --------------- INIMIGOS ---------------
 SPIDER_DUCK = registerEntity(ENEMY, "Spider Duck")
 NUCLEAR_CAT = registerEntity(ENEMY, "Nuclear Cat")
+DEMON_BALL = registerEntity(ENEMY, "Demon Ball")
+SPIDER_DUCK_BOSS = registerEntity(ENEMY, "Spider Duck Boss")
 
 ----------------- NPCs -----------------
-GLOB = registerEntity(NPC, "Glob")
+TENKAR = registerEntity(NPC, "Tenkar")
+SHOUM_SHOUM = registerEntity(NPC, "Shoum Shoum")
+BIGUIRI = registerEntity(NPC, "Biguiri")
 
 ---------------- ARMAS -----------------
 KATANA = registerEntity(WEAPON, "Katana")
 SLING_SHOT = registerEntity(WEAPON, "Sling Shot")
+BOOMERANGUE = registerEntity(WEAPON, "Boomerangue")
+SKULL_SHOOTER = registerEntity(WEAPON, "Skull Shooter")
+BLACKHOLER = registerEntity(WEAPON, "Blackholer")
+FLOWERGUN = registerEntity(WEAPON, "Flowergun")
+
+--------------- ATAQUES ---------------
+PEBBLE_SHOT = registerEntity(ATTACK, "Pebble Shot")
+NUCLEAR_SHOT = registerEntity(ATTACK, "Nuclear Shot")
+SKULL_SHOT = registerEntity(ATTACK, "Skull Shot")
+BOOMERANGUE_SHOT = registerEntity(ATTACK, "Boomerangue Shot")
+ROTATORY_ATK = registerEntity(ATTACK, "Rotatory Attack")
+BLACKHOLE_SHOT = registerEntity(ATTACK, "Blackhole Shot")
+SEED_SHOT = registerEntity(ATTACK, "Seed Shot")
+EMBER_MARK = registerEntity(ATTACK, "Ember Mark")
+DEMON_JUMP = registerEntity(ATTACK, "Demon Jump")
+
+-------------- ARTEFATOS ---------------
+INVISIBILITY_RING = registerEntity(ARTIFACT, "Invisibility Ring")
 
 ------------- DESTRUTÍVEIS -------------
 JAR = registerEntity(DESTRUCTIBLE, "jar")
 BARREL = registerEntity(DESTRUCTIBLE, "barrel")
-
------------------ DROP -----------------
-COIN = registerEntity(DROP, "coin")
+TALL_GRASS = registerEntity(DESTRUCTIBLE, "tall grass")
 
 -------------- RECURSOS ----------------
 CASKIN = registerEntity(RESOURCE, "caskin")
@@ -68,18 +88,33 @@ CHONGO = registerEntity(RESOURCE, "chongo")
 WAMOLI = registerEntity(RESOURCE, "wamoli")
 ZUB = registerEntity(RESOURCE, "zub")
 
------------------ SALA -----------------
-
 ------------- OBSTÁCULO ----------------
-PILLAR = registerEntity(OBSTACLE, "pillar")
 WALL_UP = registerEntity(OBSTACLE, "wall up")
 WALL_DOWN = registerEntity(OBSTACLE, "wall down")
 WALL_LEFT_BACK = registerEntity(OBSTACLE, "wall left back")
 WALL_LEFT_FRONT = registerEntity(OBSTACLE, "wall left front")
 WALL_RIGHT_BACK = registerEntity(OBSTACLE, "wall right back")
 WALL_RIGHT_FRONT = registerEntity(OBSTACLE, "wall right front")
+PILLAR = registerEntity(OBSTACLE, "pillar")
+PILLAR_BASE = registerEntity(OBSTACLE, "pillar base")
 
------------------- BUILDINGS -----------------
+------------- DECORAÇÕES ---------------
+CANDLE = registerEntity(OBSTACLE, "candle")
+TORCH = registerEntity(OBSTACLE, "torch")
+CRACKS = registerEntity(OBSTACLE, "cracks")
+FLOWERS = registerEntity(OBSTACLE, "flowers")
+MOSS = registerEntity(OBSTACLE, "moss")
+MOSS_LEFT = registerEntity(OBSTACLE, "moss left")
+MOSS_RIGHT = registerEntity(OBSTACLE, "moss right")
+MOSS_UP = registerEntity(OBSTACLE, "moss up")
+SKELETON = registerEntity(OBSTACLE, "skeleton")
+NEGATIVE = registerEntity(OBSTACLE, "negative")
+PAPER = registerEntity(OBSTACLE, "paper")
+RUBBLE_SMALL = registerEntity(OBSTACLE, "rubble small")
+RUBBLE_BIG = registerEntity(OBSTACLE, "rubble big")
+TILES = registerEntity(OBSTACLE, "tiles")
+
+------------- CONSTRUÇÕES --------------
 FIRECAMP =
 	registerEntity(BUILDING, "firecamp", "It can be simple and small, but it is warm and attracts good creatures")
 CHEST = registerEntity(BUILDING, "chest", "It's bigger on the inside than it looks... and it's made with love")
@@ -98,3 +133,9 @@ DOOR_LEFT = registerEntity(INTERACTIVE, "door left")
 DOOR_RIGHT = registerEntity(INTERACTIVE, "door right")
 DOOR_DOWN = registerEntity(INTERACTIVE, "door down")
 TURTLE = registerEntity(INTERACTIVE, "turtle")
+
+--------------- BÊNÇÃOS ----------------
+ARCHER_BLESSING = registerEntity(BLESSING, "archer blessing")
+FIRE_BLESSING = registerEntity(BLESSING, "fire blessing")
+PIGMEU_BLESSING = registerEntity(BLESSING, "pigmeu blessing")
+GOMUGOMU_BLESSING = registerEntity(BLESSING, "gomu gomu blessing")

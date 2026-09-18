@@ -12,6 +12,14 @@ require("modules.utils.utils")
 require("table")
 
 ----------------------------------------
+-- Enums
+----------------------------------------
+-- opções do que acontece se o player toca no destrutível
+FRAGILE = "fragile"   -- quebra quando player toca
+UNSTABLE = "unstable" -- se move mas não quebra
+STABLE = "stable"     -- não se move e nem quebra
+
+----------------------------------------
 -- Classe Destructible
 ----------------------------------------
 
@@ -21,7 +29,8 @@ require("table")
 ---@field spriteSheets table<string, table>
 ---@field animations table<string, Animation>
 ---@field loot Loot
----@field addAnimations fun(self: Destructible, intactSettings: AnimSettings, breakingSettings: AnimSettings, brokenSettings: AnimSettings)
+---@field fragility string
+---@field addAnimations fun(self: Destructible, animSettings: table<string, AnimSettings>)
 
 Destructible = setmetatable({}, { __index = Entity })
 Destructible.__index = Destructible
@@ -32,9 +41,10 @@ Destructible.type = DESTRUCTIBLE
 ---@param room Room
 ---@param loot Loot
 ---@param hitboxes Hitboxes
+---@param fragility string?
 ---@return Destructible
 -- cria um objeto destrutível contendo um certo `loot`
-function Destructible.new(name, pos, room, loot, hitboxes)
+function Destructible.new(name, pos, room, loot, hitboxes, fragility)
 	---@type Destructible
 	local obj = setmetatable({}, Destructible) ---@diagnostic disable-line
 	obj:init(name, pos, hitboxes, room)
@@ -43,6 +53,7 @@ function Destructible.new(name, pos, room, loot, hitboxes)
 	obj.spriteSheets = {}
 	obj.animations = {}
 	obj.loot = loot or LOOT_TABLE[name] or Loot.new() -- pode ser sobrescrito na criação
+	obj.fragility = fragility or FRAGILE
 
 	table.insert(room.destructibles, obj)
 	return obj
@@ -52,20 +63,13 @@ end
 -- Animações
 ----------------------------------------
 
----@param intactSettings AnimSettings
----@param breakingSettings AnimSettings
----@param brokenSettings AnimSettings
+---@param animSettings table<string, AnimSettings>
 -- aplica as animações dos estados `INTACT`, `BREAKING` e `BROKEN` ao `Destructible`
-function Destructible:addAnimations(intactSettings, breakingSettings, brokenSettings)
-	---------------- INTACT ----------------
-	local path = pngPathFormat({ "assets", "animations", "destructibles", self.name, INTACT })
-	addAnimation(self, path, INTACT, intactSettings)
-	--------------- BREAKING ---------------
-	path = pngPathFormat({ "assets", "animations", "destructibles", self.name, BREAKING })
-	addAnimation(self, path, BREAKING, breakingSettings)
-	---------------- BROKEN ----------------
-	path = pngPathFormat({ "assets", "animations", "destructibles", self.name, BROKEN })
-	addAnimation(self, path, BROKEN, brokenSettings)
+function Destructible:addAnimations(animSettings)
+	for state, settings in pairs(animSettings) do
+		local path = pngPathFormat({ "assets", "animations", "destructibles", self.name, state })
+		addAnimation(self, path, state, settings)
+	end
 end
 
 ----------------------------------------
@@ -82,6 +86,16 @@ function Destructible:damage(amount)
 	self.health = self.health - amount
 	if self.health <= 0 then
 		self:breakApart()
+	end
+end
+
+-- função chamada quando um player colide com um destrutível UNSTABLE
+function Destructible:destabilize()
+	self.state = MOVING
+	local anim = self.animations[MOVING]
+	anim.onFinish = function()
+		self.state = INTACT
+		anim:reset()
 	end
 end
 
@@ -112,14 +126,22 @@ end
 ---@param camera Camera
 -- função de renderização do `Destructible`
 function Destructible:draw(camera)
-	local viewPos = camera:viewPos(self.pos)
+	local viewX, viewY = camera:viewPos(self.pos)
 	local anim = self.animations[self.state]
-	local quad = anim.frames[anim.currFrame]
-	local offset = {
-		x = anim.frameDim.width / 2,
-		y = anim.frameDim.height / 2,
-	}
-	love.graphics.draw(self.spriteSheets[self.state], quad, viewPos.x, viewPos.y, 0, 3, 3, offset.x, offset.y)
+	local offsetX = anim.frameDim.width / 2
+	local offsetY = anim.frameDim.height / 2
+
+	love.graphics.draw(
+		self.spriteSheets[self.state],
+		anim.frames[anim.currFrame],
+		viewX,
+		viewY,
+		0,
+		3,
+		3,
+		offsetX,
+		offsetY
+	)
 end
 
 -- spawna todo o `loot` contido no `Destructible` de forma aleatória,

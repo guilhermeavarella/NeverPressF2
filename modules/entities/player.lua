@@ -1,17 +1,22 @@
 ----------------------------------------
 -- Importações de Módulos
 ----------------------------------------
-require("modules.constructors.particles")
 require("modules.constructors.craftings")
 require("modules.engine.animation")
+require("modules.engine.audiomanager")
+require("modules.engine.vfxmanager")
+require("modules.entities.mortal")
+require("modules.entities.artifact")
+require("modules.systems.blessing")
 require("modules.systems.collision")
-require("modules.entities.entity")
 require("modules.systems.inventory")
 require("modules.systems.inputbuffer")
+require("modules.systems.control")
 require("modules.utils.colors")
 require("modules.utils.constructors")
 require("modules.utils.shapes")
 require("modules.utils.states")
+require("modules.utils.timer")
 require("modules.utils.types")
 require("modules.utils.utils")
 require("modules.utils.vec")
@@ -22,85 +27,100 @@ require("table")
 ----------------------------------------
 
 players = {}
+local MAX_HP = 100
 
 ----------------------------------------
 -- Classe Player
 ----------------------------------------
 
----@class Player : Entity
+---@class Player : Mortal
 ---@field id number
 ---@field hp number
----@field controls table<string, string>
+---@field maxHp number
+---@field size number
+---@field scale number
+---@field controls Controls
 ---@field colors Color[]
 ---@field speed number
 ---@field movementVec Vec
+---@field atkSpeed number
 ---@field state string
 ---@field spriteSheets table<string, table>
 ---@field animations table<string, Animation>
----@field particles table<string, ParticleSystem>
----@field weapons table[]
----@field weapon table
+---@field weapons Weapon[]
+---@field weapon Weapon
+---@field artifacts Artifact[]
+---@field artifact Artifact
 ---@field invulnerableTimer number
 ---@field blinkTimer number
 ---@field addAnimations function
----@field addParticles function
 ---@field inDialogue boolean
 ---@field interactiveObj? Entity
+---@field activeInteraction? Interactive|Npc[]
 ---@field inventory Inventory
----@field candidateInteractives Interactive|Npc[]
+---@field candidateInteractives? Interactive|Npc[]
 ---@field uiManager table
+---@field audioManager AudioManager
 ---@field craftingManager CraftingManager
+---@field blessingManager BlessingManager
+---@field vfxManager VFXManager
 ---@field building any
 ---@field buildingModeTimer number
 ---@field startBuildingMode function
----@field inputBuffer InputBuffer
----@field inFirecamp boolean
+---@field age number
+---@field defendingCooldownTimer Timer
+---@field defendingDurationTimer Timer
 
-Player = setmetatable({}, { __index = Entity })
+Player = setmetatable({}, { __index = Mortal })
 Player.__index = Player
 Player.type = PLAYER
 
 ---@param name string
 ---@param spawnPos Vec
----@param controls table<string, string>
+---@param keybinds table<string, string>
 ---@param colors Color[]
 ---@param room Room
 ---@return Player
 -- cria uma instância de `Player` e o adiciona à lista global de `players`
-function Player.new(name, spawnPos, controls, colors, room)
+function Player.new(name, spawnPos, keybinds, colors, room)
 	---@type Player
 	local player = setmetatable({}, Player) ---@diagnostic disable-line
 
-	local hb = hitbox(Circle.new(20))
-	local hbs = hitboxes({ hb })
-	player:init(name, spawnPos, hbs, room, physicsSettings(1, 9000, 12))
+	player.scale = 3
+	player.size = 20
+	player:init(name, spawnPos, player:calcHitboxes(), room, physicsSettings(1, 9000, 12), MAX_HP)
 
 	-- atributos que variam
-	player.id = #players + 1                     -- número do jogador
-	player.hp = 100                              -- pontos de vida
-	player.controls = controls                   -- os comandos para controlar o boneco, no formato {up = "", left = "", down = "", ...}
-	player.colors = colors                       -- paleta de cores do jogador
+	player.id = #players + 1 -- número do jogador
+	player.controls = Controls.new(keybinds, player) -- os comandos para controlar o boneco, no formato {up = "", left = "", down = "", ...}
+	player.colors = colors -- paleta de cores do jogador
 	-- atributos fixos na instanciação
-	player.movementVec = { x = 0, y = 0 }        -- vetor de direção e magnitude do movimento do jogador
-	player.state = IDLE                          -- define o estado atual do jogador, estreitamente relacionado às animações
-	player.spriteSheets = {}                     -- no tipo imagem do love
-	player.animations = {}                       -- as chaves são estados e os valores são Animações
-	player.particles = {}                        -- efeitos de partícula emitidos pelo player
-	player.weapons = {}                          -- lista das armas que o jogador possui
-	player.weapon = nil                          -- arma equipada
-	player.inDialogue = false                    -- se o player está em diálogo
-	player.interactiveObj = nil                  -- objeto próximo ao player com o qual ele pode interagir (ex: NPC)
-	player.inventory = Inventory.new(player)     -- inventário do jogador
-	player.candidateInteractives = {}            -- lista de objetos interativos próximos ao jogador
+	player.movementVec = { x = 0, y = 0 } -- vetor de direção e magnitude do movimento do jogador
+	player.state = IDLE -- define o estado atual do jogador, estreitamente relacionado às animações
+	player.spriteSheets = {} -- no tipo imagem do love
+	player.animations = {} -- as chaves são estados e os valores são Animações
+	player.weapons = {} -- lista das armas que o jogador possui
+	player.weapon = nil -- arma equipada
+	player.artifacts = {} -- lista de artefatos (itens ativos) que o jogador possui
+	player.artifact = nil -- artefato equipado
+	player.inDialogue = false -- se o player está em diálogo
+	player.interactiveObj = nil -- objeto próximo ao player com o qual ele pode interagir (ex: NPC)
+	player.activeInteraction = nil -- objeto com o qual o player está interagindo agora (pode ser nenhum)
+	player.inventory = Inventory.new(player) -- inventário do jogador
+	player.candidateInteractives = {} -- lista de objetos interativos próximos ao jogador
 	player.craftingManager = newCraftingRaw(player) -- gerenciador de crafting do jogador
 	player.uiManager = newPlayerUIManager(player) -- gerenciador da UI do jogador
-	player.building = nil                        -- construção que o player está posicionando para construir
+	player.audioManager = AudioManager.new({ AUDIO_MOVEMENT, AUDIO_GET_HIT }, player) -- gerenciador de áudios do jogador
+	player.blessingManager = BlessingManager.new(player) -- gerenciador de bênçãos do jogador
+	player.building = nil -- construção que o player está posicionando para construir
 	player.buildingModeTimer = 0
 	player.defaultInvulnerableTime = 0.3
 	player.hasShadow = true -- indica se a entidade tem sombra (pode ser usada para efeitos visuais)
 	player.shadowWidth = 25
-	player.inputBuffer = InputBuffer.new(player)
-	player.inFirecamp = false
+	player.atkSpeed = 1 -- porcentagem de velocidade de ataque do jogador (1 = 100%)
+	player.age = 0
+	player.defendingCooldownTimer = Timer.new(0.5)
+	player.defendingDurationTimer = Timer.new(3.0, true)
 
 	collisionManager:register(player)
 	return player
@@ -112,6 +132,11 @@ end
 ---@param dyingSettings AnimSettings
 -- adiciona animações à tabela do `Player`, associando-as aos seus estados respectivos
 function Player:addAnimations(idleSettings, defSettings, WalkSettings, dyingSettings)
+	-- !TODO: refatorar o addAnimations
+	-- for state, settings in pairs(animSettings) do
+	-- 	local path = pngPathFormat({ "assets", "animations", "players", self.name, state })
+	-- 	addAnimation(self, path, state, settings)
+	-- end
 	----------------- IDLE -----------------
 	local path = pngPathFormat({ "assets", "animations", "players", self.name, IDLE })
 	addAnimation(self, path, IDLE, idleSettings)
@@ -135,42 +160,44 @@ function Player:addAnimations(idleSettings, defSettings, WalkSettings, dyingSett
 	addAnimation(self, path, WALKING_RIGHT, WalkSettings)
 end
 
--- adiciona os efeitos de partícula à tabela do `Player`,
--- associando-os aos seus estados respectivos
-function Player:addParticles()
-	-- Efeito de partícula do player se defendendo
-	self.particles[DEFENDING] = newDefenseParticles(self.colors[1], self.colors[3])
-	-- Efeito de partícula do player caminhando
-	local walkingParticles = newWalkingParticles()
-	self.particles[WALKING_DOWN] = walkingParticles
-	self.particles[WALKING_UP] = walkingParticles
-	self.particles[WALKING_LEFT] = walkingParticles
-	self.particles[WALKING_RIGHT] = walkingParticles
+function Player:calcHitboxes()
+	local hb = hitbox(Circle.new(self.size))
+	local hbs = hitboxes({ hb })
+	return hbs
 end
 
 ---@param dt number
 -- move o `Player`, atualiza seu estado e o de suas animações e efeitos de partícula
 function Player:update(dt)
+	self.controls:update(dt)
 	if self.state == DYING then
 		self.candidateInteractives = {}
 		self.interactiveObj = nil
+		self:tryRespawn()
 	else
 		self:move(dt)
-		self.inputBuffer:update(dt)
 		self:updateBuildingMode(dt)
 		self:updateState()
 		self:resolveInteractive()
+		self.uiManager:update(dt)
 	end
-	
+
+	self:processInput()
+	self:checkEndDefense(dt)
+	Mortal.update(self, dt)
+	self.age = self.age + dt
 	self.animations[self.state]:update(dt)
-	self:updateParticles(dt)
-	self:updateInvulnerability(dt)
+
 	for _, w in pairs(self.weapons) do
 		-- atualizando a animação da arma equipada
-		if w == self.weapon then
+		if w == self.weapon and self.weapon.animations[self.weapon.state] then
 			self.weapon.animations[self.weapon.state]:update(dt)
 		end
 		w:update(dt)
+	end
+
+	for _, a in pairs(self.artifacts) do
+		a:update(dt)
 	end
 end
 
@@ -185,16 +212,16 @@ function Player:move(dt)
 	if self.state == DEFENDING or self.inDialogue then
 		return
 	end
-	if love.keyboard.isDown(self.controls.up) then
+	if self.controls:checkAction(ACT_MU) then
 		movementDir.y = -1
 	end
-	if love.keyboard.isDown(self.controls.down) then
+	if self.controls:checkAction(ACT_MD) then
 		movementDir.y = 1
 	end
-	if love.keyboard.isDown(self.controls.left) then
+	if self.controls:checkAction(ACT_ML) then
 		movementDir.x = -1
 	end
-	if love.keyboard.isDown(self.controls.right) then
+	if self.controls:checkAction(ACT_MR) then
 		movementDir.x = 1
 	end
 
@@ -217,7 +244,6 @@ function Player:move(dt)
 
 	-- atualizando objetos cujo movimento depende do Player
 	self:updateBuildingPos()
-	self:updateParticlesPos()
 	if self.weapon then
 		-- separa a orientação da arma em dois casos para amenizar o bug ao colidir com paredes
 		if not nullVec(self.vel) then
@@ -228,20 +254,24 @@ function Player:move(dt)
 	end
 end
 
+function Player:checkEndDefense(dt)
+	self.defendingCooldownTimer:update(dt)
+	self.defendingDurationTimer:update(dt)
+	if not self.controls:checkAction(ACT_DEF) or self.state == DYING then
+		self.defendingDurationTimer:stop()
+	end
+end
+
 -- atualiza o estado do `Player`
 function Player:updateState()
 	local prevState = self.state
 	local isMoving = not nullVec(self.vel)
-	if love.keyboard.isDown(self.controls.act2) then
-		-- só defende se está completamente parado; se não, muda de arma
-		if not isMoving and not self.interactiveObj then
-			if prevState ~= DEFENDING then
-				self.particles[DEFENDING]:start()
-			end
-			self.state = DEFENDING
-		end
+
+	if self.defendingDurationTimer.active then
+		self.state = DEFENDING
 	else
 		local isVerticalMovement = math.abs(self.vel.y) > math.abs(self.vel.x)
+
 		if self.vel.y < 0 and isVerticalMovement then
 			self.state = WALKING_UP
 		elseif self.vel.y > 0 and isVerticalMovement then
@@ -257,35 +287,27 @@ function Player:updateState()
 
 	-- atualizando a situação do sistema de partículas de caminhada
 	if isMoving then
-		if self.particles[self.state] then
-			self.particles[self.state]:setDirection(math.atan2(self.vel.y, self.vel.x) + math.pi)
-			self.particles[self.state]:start()
-		end
+		globalVFXManager:playParticle(PARTICLE_WALKING, self, vec(0, 24), true)
 	else
-		self.particles[WALKING_UP]:stop()
+		globalVFXManager:stopParticle(PARTICLE_WALKING, self)
 	end
 
-	-- resetando a animação anterior, caso o estado tenha mudado
+	-- situações que ocorrem em troca de estado
 	if self.state ~= prevState then
-		if prevState == DEFENDING then
-			self.particles[DEFENDING]:stop()
-		end
+		-- resetando a animação anterior
 		self.animations[prevState]:reset()
+		-- parando efeito de partículas
+		if prevState == DEFENDING then
+			globalVFXManager:stopParticle(PARTICLE_DEFENSE, self)
+		end
+		-- iniciando ou parando áudio de movimento
+		local wasMoving = isMovementState(prevState)
+		if isMoving and not wasMoving then
+			self.audioManager:play(AUDIO_MOVEMENT)
+		elseif not isMoving and wasMoving then
+			self.audioManager:stop(AUDIO_MOVEMENT)
+		end
 	end
-end
-
----@param dt number
--- atualiza os efeitos de partícula do `Player`
-function Player:updateParticles(dt)
-	self.particles[DEFENDING]:update(dt)
-	-- atualiza as partículas de caminhada como um todo
-	self.particles[WALKING_UP]:update(dt)
-end
-
--- atualiza as posições dos efeitos de partícula do `Player`
-function Player:updateParticlesPos()
-	self.particles[DEFENDING]:setPosition(self.pos.x, self.pos.y)
-	self.particles[WALKING_UP]:setPosition(self.pos.x, self.pos.y + 24)
 end
 
 -- faz com que a construção fique na direção aproximada em que o player está olhando (considera colisões)
@@ -297,7 +319,6 @@ end
 
 -- começa o modo de construção/posicionamento de algum objeto
 function Player:startBuildingMode(building)
-	debugTable("building", building)
 	self.building = building
 	setPos(self.building, addVec(self.pos, vec(100, 0)))
 	self.buildingModeTimer = 0
@@ -315,10 +336,14 @@ end
 -- posiciona a construção e
 function Player:build()
 	-- timer necessário para não bugar e construir imediatamente ao comprar
-	if self.building and self.buildingModeTimer > 0.5 then
+	if self.building and self.buildingModeTimer > 0.3 then
 		-- !TODO: consumir recursos do player
 		self.building.actualized = true
 		self.room:addBuilding(self.building)
+		if self.building.name == FIRECAMP.name then
+			respawnRoom = self.room.arrPos
+			respawnPos = self.building.pos
+		end
 		self.building = nil
 	end
 end
@@ -331,104 +356,91 @@ function Player:endBuildingMode()
 	end
 end
 
----@param key string
----@param isBuffered boolean
--- verifica se o `Player` está pressionando a tecla de ação 1, e então
--- realiza a ação correta de acordo com o contexto
-function Player:checkAction1(key, isBuffered)
-	-- casos em que ignoramos o input
-	if key ~= self.controls.act1 or self.uiManager.activeScene or self.state == DYING then
-		return
+---@param key any
+-- trata inputs de teclado. Se `key` não fizer parte dos controles do player, é ignorado
+function Player:processInput()
+	-- DEBUG -------------
+	if key == "i" and self.artifact then
+		self.artifact:use()
 	end
-
-	if self.building then
-		self:build()
-		return
-	end
-
-	-- daqui pra frente APENAS ações que não podem ser feitas
-	-- quando defendendo
-	if self.state == DEFENDING then
-		return
-	end
-
-	-- imagino que não queremos que o buffer afete o diálogo
-	if self.inDialogue and not isBuffered then
-		DialogueManager:getDialogueByPlayer(self):advance()
-		return
-	end
-
-	-- controlará se iremos bufferizar o input atual ou não
-	local shouldBuffer = false
-
-	if self.weapon then
-		if not isBuffered then
-			shouldBuffer = not self.weapon:attack()
-		elseif isBuffered then
-			if self.weapon:attack() then
-				self.inputBuffer:pop(self.controls.act1)
-			end
-		end
-	end
-
-	if shouldBuffer then
-		self.inputBuffer:buffer(key)
-	end
-end
-
----@param key string
--- verifica se o `Player` está pressionando a tecla de ação 2
--- caso positivo, executa a ação correta dependendo do contexto
-function Player:checkAction2(key)
-	if key ~= self.controls.act2 or self.uiManager.activeScene or self.state == DYING then
-		return
-	end
-	if self.building then
-		self:endBuildingMode()
-	elseif self.interactiveObj then
-		if self.interactiveObj.type == NPC then
-			DialogueManager:start(self.interactiveObj.dialogue, self.interactiveObj, self)
-			stopMovement(self)
-		elseif self.interactiveObj.type == INTERACTIVE then
-			self.interactiveObj.onInteract(self.interactiveObj, self)
-		end
-	elseif self.vel.x ~= 0 then
-		local len = #self.weapons
-		if len <= 1 then
-			return
-		end
-		local indexWeapon = tableIndexOf(self.weapons, self.weapon)
-		local nextIndex = indexWeapon
-		-- caminha ciclicamente entre as armas
-		if self.vel.x > 0 then
-			nextIndex = (indexWeapon % len) + 1
-		else
-			nextIndex = ((indexWeapon - 2 + len) % len) + 1
-		end
-
-		self:equipWeapon(self.weapons[nextIndex].name)
-	end
-end
-
----@param key string
--- verifica se o `Player` está pressionando a combinação de teclas para abrir o inventário
-function Player:checkSpecialActions(key)
+	self:checkSpecialActions()
+	----------------------
+	
 	if self.state == DYING then
 		return
 	end
 
-	if key == "i" and love.keyboard.isDown(self.controls.act1) then
-		self.uiManager:toggleScene(UI_INVENTORY_SCENE)
+	if self.uiManager.activeScene then
+		if self.controls:checkAction(ACT_EXT) then
+			self.uiManager:deactivateAllScenes()
+			if self.activeInteraction then
+				self.activeInteraction:onCloseInteract(self)
+				self.activeInteraction = nil
+			end
+		end
+		return
 	end
-	if key == "c" and love.keyboard.isDown(self.controls.act1) then
-		self.uiManager:toggleScene(UI_CRAFTING_SCENE)
+
+	if self.building then 
+		if self.controls:checkAction(ACT_CON) then
+			self:build()
+			return
+		elseif self.controls:checkAction(ACT_EXT) then
+			self:endBuildingMode()
+		end
 	end
-	if key == "p" and love.keyboard.isDown(self.controls.act1) then
-		self.room:toggleDoors()
+	
+	if self.interactiveObj and self.controls:checkAction(ACT_INT) then
+		if self.interactiveObj.type == NPC then
+			DialogueManager:start(self.interactiveObj.dialogue, self.interactiveObj, self)
+		elseif self.interactiveObj.type == INTERACTIVE then
+			-- define a interação ativa se for uma interação duradoura (como um baú, que se mantém aberto até ser fechado)
+			self.activeInteraction = self.interactiveObj.onInteract(self.interactiveObj, self)
+		end
+		stopMovement(self)
+	end
+
+	if self.inDialogue and self.controls:checkAction(ACT_CON) then 
+		DialogueManager:getDialogueByPlayer(self):advance()
+		return
+	end
+
+	if self.controls:checkAction(ACT_ATK) then
+		self.weapon:attack()
+	end
+
+	if self.controls:checkAction(ACT_DEF) then
+		if not self.defendingDurationTimer.active and not self.defendingDurationTimer.completed and not self.defendingCooldownTimer.active then
+			globalVFXManager:playParticle(PARTICLE_DEFENSE, self, vec(0, 0), true, self.colors[1], self.colors[3])
+			self.defendingDurationTimer:start()
+			self.defendingCooldownTimer:stop()
+		elseif not self.defendingCooldownTimer.active and not self.defendingCooldownTimer.completed and self.defendingDurationTimer.completed then
+			self.defendingCooldownTimer:start()
+			self.defendingDurationTimer:stop()
+		end
 	end
 end
 
----@param weapon any
+-- DEB UG --
+---@param key string
+-- verifica se o `Player` está pressionando a combinação de teclas para abrir o inventário
+function Player:checkSpecialActions()
+	if self.state == DYING then
+		return
+	end
+
+	if self.controls:checkAction(ACT_INT) then
+		self.uiManager:toggleScene(UI_CRAFTING_SCENE)
+		stopMovement(self)
+	end
+
+	if self.controls:checkAction(ACT_OUI) then
+		self.uiManager:toggleScene(UI_EQUIPMENT_SCENE)
+		stopMovement(self)
+	end
+end
+
+---@param weapon Weapon
 ---@return boolean
 -- adiciona uma arma ao arsenal do `Player` caso ele não a tenha
 function Player:collectWeapon(weapon)
@@ -467,11 +479,38 @@ function Player:unequipWeapon()
 	self.weapon = nil
 end
 
+---@param artifact Artifact
 ---@return boolean
--- coleta uma moeda; função não séria
-function Player:collectCoin()
-	print("moedinhaaa")
-	return true
+-- tenta coletar um artefato, retorna um booleano indicando o sucesso
+function Player:collectArtifact(artifact)
+	if #self.artifacts >= 2 then
+		return false
+	else
+		self.artifacts[#self.artifacts + 1] = artifact
+		return true
+	end
+end
+
+---@param artifactName string
+-- define um artefato de nome `artifactName` como sendo o equipado, se o jogador tiver um
+function Player:equipArtifact(artifactName)
+	for _, a in pairs(self.artifacts) do
+		if a.name == artifactName then
+			self.artifact = a
+		end
+	end
+end
+
+---@param artifactName string
+---@return boolean
+-- retorna true se o player tiver o artefato e false se ele não tiver
+function Player:hasArtifact(artifactName)
+	for _, a in pairs(self.artifacts) do
+		if a.name == artifactName then
+			return true
+		end
+	end
+	return false
 end
 
 ---@param resource Resource
@@ -494,10 +533,10 @@ function Player:collectDrop(drop)
 		if result then
 			self:equipWeapon(drop.object.name)
 		end
-	elseif drop.object.type == drop then
-		result = self:collectCoin()
 	elseif drop.object.type == RESOURCE then
 		result = self:collectResource(drop.object)
+	elseif drop.object.type == BLESSING then
+		result = self.blessingManager:equip(drop.object)
 	end
 	if result then
 		drop:setCollected()
@@ -514,7 +553,7 @@ function Player:tryCollectDrop(drop)
 	if drop.autoPick then
 		self:collectDrop(drop)
 		return
-	elseif love.keyboard.isDown(self.controls.act2) then
+	elseif love.controls:checkInput(ACT_INT) then
 		self:collectDrop(drop)
 		return
 	end
@@ -564,78 +603,135 @@ function Player:chooseBestInteractive(list)
 	return best
 end
 
-function Player:heal(amount)
-	self.hp = math.min(self.hp + amount, 100)
-end
-
+---@param damage number
+-- diminui a vida do player e treme sua câmera um pouco
 function Player:takeDamage(damage)
-	if self.state == DYING or self:isInvulnerable() then
-		return false
-	end
-
-	self:setInvulnerable()
-	self.hp = math.max(self.hp - damage, 0)
-
-	print(self.name .. " took " .. damage .. " damage" .. "(hp: " .. self.hp .. ")")
-
-	if self.hp <= 0 then
-		self:die()
-	end
-	return true
+	Mortal.takeDamage(self, damage)
+	cameras[self.id]:shake(damage / 5, 0.5)
+	self.audioManager:play(AUDIO_GET_HIT)
 end
 
-function Player:die()
-	if self.state == DYING then
+-- tenta reespawnar quando está morto
+function Player:tryRespawn()
+	if self.deathTimer < 2 then
 		return
 	end
+	-- movendo player de uma sala para a outra
+	self.pos = respawnPos
+	collisionManager:onPlayerRoom(self, rooms[respawnRoom.y][respawnRoom.x])
+	-- resetando os estados e
+	collisionManager:register(self)
+	if #self.weapons > 0 then
+		self:equipWeapon(self.weapons[1].name)
+	end
+	self.state = IDLE
+	self.hp = MAX_HP
+	self.deathTimer = 0
+end
 
-	print(self.name .. " died")
-
-	self.state = DYING
-	self:unequipWeapon()
-	stopMovement(self)
+---@param chest Interactive
+-- abre a UI do baú e a preenche com os recursos necessários
+function Player:openChest(chest)
+	-- limpando a UI do baú caso outro player tenha mexido nela e modificado sem sabermos
+	self.uiManager.scenes[UI_CHEST_SCENE].layers[ELEM_LAYER_2] = {}
+	-- salvando a posição da seleção para não bugar ao inserir novos elementos na cena
+	local selPos = self.uiManager.scenes[UI_CHEST_SCENE].selectionPos
+	-- adicionando os items do player nos slots da esquerda
+	local idx = 0
+	for _, itemList in pairs(self.inventory.items) do
+		for _, item in pairs(itemList) do
+			idx = idx + 1
+			self.uiManager.scenes[UI_CHEST_SCENE]:addPlayerResourceEl(
+				item,
+				self.inventory,
+				self.uiManager.canvasSize,
+				idx,
+				self,
+				chest
+			)
+		end
+	end
+	-- adicionando os items que estão no baú nos slots da direita
+	idx = 0
+	for _, itemList in pairs(chest.inventory.items) do
+		for _, item in pairs(itemList) do
+			idx = idx + 1
+			self.uiManager.scenes[UI_CHEST_SCENE]:addChestResourceEl(
+				item,
+				inventory,
+				self.uiManager.canvasSize,
+				idx,
+				self,
+				chest
+			)
+		end
+	end
+	self.uiManager.scenes[UI_CHEST_SCENE].selectionPos = selPos
+	self.uiManager:activateScene(UI_CHEST_SCENE)
 end
 
 ---@param camera Camera
 -- renderiza o `Player` na perspectiva da `camera`
 function Player:draw(camera)
-	-- desenhando o efeito de partículas de caminhada atrás do player
-	local particles_offset = {
-		x = -camera.cx + camera.viewport.width / 2,
-		y = -camera.cy + camera.viewport.height / 2,
-	}
-	love.graphics.draw(self.particles[WALKING_UP], particles_offset.x, particles_offset.y)
-
-	if self:isInvulnerable() then
-		love.graphics.setShader(whiteShader)
-		whiteShader:send("fillColor", { 1, 1, 1, 1.0 })
-	elseif self.inFirecamp then
-		-- TODO: implementar shader legal enquanto estiver healando
-	end
-
 	-- TODO: usar algum tipo de "vinheta" na tela para indicar que o player está com pouca vida (igual no Deadly Encounter)
 
 	-- desenhando o player em si
-	local viewPos = camera:viewPos(self.pos)
+	local viewX, viewY = camera:viewPos(self.pos)
 	local animation = self.animations[self.state]
-	local quad = animation.frames[animation.currFrame]
 	local p = self.invulnerableTimer > 0
-		and (self.defaultInvulnerableTime - self.invulnerableTimer) / self.defaultInvulnerableTime
+			and (self.defaultInvulnerableTime - self.invulnerableTimer) / self.defaultInvulnerableTime
 		or 0
-	local defaultScale = 3
+	local defaultScale = self.scale
 	local scaleX = defaultScale - 0.8 * math.sin(2 * math.pi * p)
 	local scaleY = defaultScale + 0.8 * math.sin(2 * math.pi * p)
-	local offset = {
-		x = animation.frameDim.width / 2,
-		y = (animation.frameDim.height * scaleY - (animation.frameDim.height / 2) * defaultScale) / scaleY,
-	}
-	love.graphics.draw(self.spriteSheets[self.state], quad, viewPos.x, viewPos.y, 0, scaleX, scaleY, offset.x, offset.y)
+	local offsetX = animation.frameDim.width / 2
+	local offsetY = (animation.frameDim.height * scaleY - (animation.frameDim.height / 2) * defaultScale) / scaleY
 
-	-- desenhando o efeito de partículas da defesa em cima do player
-	love.graphics.draw(self.particles[DEFENDING], particles_offset.x, particles_offset.y)
-	if self:isInvulnerable() or self.inFirecamp then
-		love.graphics.setShader()
+	self:drawShaders()
+
+	local rotateOffset, angle = self:defenseShake(vec(0, 6), scaleX, scaleY)
+
+	-- rotaciona o player em torno de um ponto de rotação (offset) para dar o efeito de "tremor" ao defender
+	love.graphics.push()
+	love.graphics.translate(viewX + rotateOffset.x, viewY + rotateOffset.y)
+	love.graphics.rotate(angle)
+	love.graphics.translate(-viewX - rotateOffset.x, -viewY - rotateOffset.y)
+
+	love.graphics.draw(
+		self.spriteSheets[self.state],
+		animation.frames[animation.currFrame],
+		viewX,
+		viewY,
+		0,
+		scaleX,
+		scaleY,
+		offsetX,
+		offsetY
+	)
+
+	love.graphics.pop()
+
+	love.graphics.setShader()
+end
+
+function Player:defenseShake(offset, scaleX, scaleY)
+	local shakeFunc = function(t, a)
+		if t < a or t > a + 1 then
+			return 0
+		end
+
+		return Easing.inOutQuart(t - a)
 	end
+
+	local k = self.defendingDurationTimer.duration - 1
+	local deg = math.rad(4)
+	local shake = shakeFunc(self.defendingDurationTimer.time, k)
+	local angle = shake * math.sin(40 * (self.age ^ 4)) * deg
+
+	local rotateOffset = shake > 0 and offset or vec(0, 0)
+	rotateOffset = vec(scaleX * rotateOffset.x, scaleY * rotateOffset.y)
+
+	return rotateOffset, angle
 end
 
 ----------------------------------------

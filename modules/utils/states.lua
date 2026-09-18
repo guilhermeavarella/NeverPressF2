@@ -13,14 +13,19 @@ WALKING_LEFT = "walking left"
 WALKING_RIGHT = "walking right"
 DEFENDING = "defending"
 ATTACKING = "attacking"
-ATTACKING_UP = "attacking up"
-ATTACKING_DOWN = "attacking down"
-ATTACKING_LEFT = "attacking left"
-ATTACKING_RIGHT = "attacking right"
+UP = "up"
+DOWN = "down"
+RIGHT = "right"
+LEFT = "left"
 HURTING = "hurting" -- tomando dano
 DYING = "dying"
 
-------------- DESTRUTÍVEIS / ATAQUES -------------
+DIRECTIONS = { UP, DOWN, LEFT, RIGHT }
+
+----------------- NPCS -----------------
+SPEAKING = "speaking"
+
+-------- DESTRUTÍVEIS / ATAQUES --------
 
 INTACT = "intact"
 BREAKING = "breaking"

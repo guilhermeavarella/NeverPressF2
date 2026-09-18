@@ -1,14 +1,16 @@
 ----------------------------------------
 -- Importações de Módulos
 ----------------------------------------
-require("modules.constructors.destructibles")
+require("modules.constructors.blessings")
 require("modules.constructors.buildings")
+require("modules.constructors.destructibles")
 require("modules.constructors.interactives")
 require("modules.constructors.enemies")
 require("modules.constructors.npcs")
 require("modules.constructors.player")
 require("modules.constructors.obstacles")
 require("modules.constructors.resources")
+require("modules.constructors.artifacts")
 require("modules.utils.types")
 require("modules.utils.entities")
 
@@ -33,25 +35,42 @@ CONSTRUCTORS[PLAYER] = {
 CONSTRUCTORS[ENEMY] = {
 	[SPIDER_DUCK.name] = newSpiderDuck,
 	[NUCLEAR_CAT.name] = newNuclearCat,
+	[DEMON_BALL.name] = newDemonBall,
+	[SPIDER_DUCK_BOSS.name] = newSpiderDuckBoss,
 }
 
 CONSTRUCTORS[NPC] = {
-	[GLOB.name] = initGlob,
+	[TENKAR.name] = initTenkar,
+	[SHOUM_SHOUM.name] = initShoumShoum,
+	[BIGUIRI.name] = initBiguiri,
+}
+
+CONSTRUCTORS[ARTIFACT] = {
+	[INVISIBILITY_RING.name] = newInvisibilityRing,
 }
 
 CONSTRUCTORS[DESTRUCTIBLE] = {
 	[BARREL.name] = newBarrel,
 	[JAR.name] = newJar,
+	[TALL_GRASS.name] = newTallGrass,
 }
 
 CONSTRUCTORS[OBSTACLE] = {
-	[PILLAR.name] = newPillar,
 	[WALL_UP.name] = newWallUp,
 	[WALL_DOWN.name] = newWallDown,
 	[WALL_LEFT_BACK.name] = newWallLeftBack,
 	[WALL_LEFT_FRONT.name] = newWallLeftFront,
 	[WALL_RIGHT_BACK.name] = newWallRightBack,
 	[WALL_RIGHT_FRONT.name] = newWallRightFront,
+	[PILLAR.name] = newPillar,
+	[PILLAR_BASE.name] = newPillarBase,
+	[CANDLE.name] = newCandle,
+	[MOSS.name] = newMoss,
+	[NEGATIVE.name] = newNegative,
+	[SKELETON.name] = newSkeleton,
+	[RUBBLE_SMALL.name] = newRubbleSmall,
+	[RUBBLE_BIG.name] = newRubbleBig,
+	[CRACKS.name] = newCracks,
 }
 
 CONSTRUCTORS[INTERACTIVE] = {
@@ -95,4 +114,11 @@ CONSTRUCTORS[RESOURCE] = {
 CONSTRUCTORS[PRODUCT] = {
 	[CHEST.name] = newChest,
 	[FIRECAMP.name] = newFirecamp,
+}
+
+CONSTRUCTORS[BLESSING] = {
+	[ARCHER_BLESSING.name] = newArcherBlessing,
+	[FIRE_BLESSING.name] = newFireBlessing,
+	[PIGMEU_BLESSING.name] = newPigmeuBlessing,
+	[GOMUGOMU_BLESSING.name] = newGomuGomuBlessing,
 }

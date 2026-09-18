@@ -25,7 +25,7 @@ function newTurtle(spawnPos, room)
 			turtle.state = IDLE
 		end
 	end
-	local turtle = Interactive.new("turtle", spawnPos, hbs, room, physics, onInteract, update)
+	local turtle = Interactive.new("turtle", spawnPos, hbs, room, physics, onInteract, nil, update)
 	local animSettings = {}
 	animSettings[IDLE] = newAnimSetting(2, { width = 32, height = 32 }, 0.2, true, 1)
 	animSettings[MOVING] = newAnimSetting(8, { width = 32, height = 32 }, 0.08, true, 1)
@@ -33,16 +33,22 @@ function newTurtle(spawnPos, room)
 end
 
 ---------- DOORS ----------
-local onInteractDoor = function(door, player)
-	if door.state == OPEN then
-		door.state = CLOSING
-		door.closingTimer = 0.05 * 17 -- sincroniza com a animação
-		door.animations[OPENING]:reset()
-	elseif door.state == CLOSED then
-		door.state = OPENING
-		door.openingTimer = 0.05 * 19 -- mesma coisa
-		door.animations[CLOSING]:reset()
+local openDoor = function(door, player)
+	if door.state == OPEN or door.state == OPENING then
+		return
 	end
+	door.state = OPENING
+	door.openingTimer = 0.05 * 19 -- sincroniza com a animação
+	door.animations[CLOSING]:reset()
+end
+
+local closeDoor = function (door, player)
+	if door.state == CLOSED or door.state == CLOSING then
+		return
+	end
+	door.state = CLOSING
+	door.closingTimer = 0.05 * 17 -- sincroniza com a animação
+	door.animations[OPENING]:reset()
 end
 
 local updateDoor = function(door, dt)
@@ -62,13 +68,13 @@ local updateDoor = function(door, dt)
 		if oldTimer > 0.3 and door.closingTimer < 0.3 then
 			-- o hitbox depende da direção da porta
 			if door.name == DOOR_UP.name or door.name == DOOR_DOWN.name then
-				door.hb.solids = { hitbox(Rectangle.new(140, 80)) }
+				door.hb.solids = { hitbox(Rectangle.new(180, 80)) }
 			else
 				door.hb.solids = { hitbox(Rectangle.new(60, 200), vec(0, 100)) }
 			end
 			collisionManager:register(door)
 		end
-		if door.closingTimer < 0 then
+		if door.closingTimer <= 0 then
 			door.state = CLOSED
 		end
 	end
@@ -77,11 +83,21 @@ end
 function newDoor(spawnPos, room, doorType)
 	local physics = physicsSettings(math.huge, 0, 0, nil, nil, nil, 0.0)
 	local hbs = hitboxes({}, {}, {})
-	local door = Interactive.new(doorType.name, spawnPos, hbs, room, physics, onInteractDoor, updateDoor)
+	local door = Interactive.new(doorType.name, spawnPos, hbs, room, physics, openDoor, closeDoor, updateDoor)
 
 	door.state = OPEN
 	door.openingTimer = 0 ---@diagnostic disable-line
 	door.closingTimer = 0 ---@diagnostic disable-line
+
+	-- adicionando na lista global de portas
+	local idx = room:getDoorIndex(doorType.name)
+	if not doors[idx.y] then
+		doors:insert(idx.y, BiList.new())
+	end
+	if not doors[idx.y][idx.x] then -- evitando overwrite
+		doors[idx.y]:insert(idx.x, door)
+	end
+	door.arrPos = idx
 
 	local animSettings = {}
 
